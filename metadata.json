@@ -1,0 +1,8 @@
+{
+  "name": "R8 PPDB Ar-Risalah Aceh",
+  "description": "Sistem Penerimaan Peserta Didik Baru (PPDB) Yayasan Ar-Risalah Aceh untuk jenjang TK, SD, SMP, dan SMA dengan dukungan mode mobile wali dan dashboard manajemen yayasan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
