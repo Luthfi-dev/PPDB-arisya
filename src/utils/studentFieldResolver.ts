@@ -1,4 +1,4 @@
-import type { FormField, FormSection, LetterCardFieldConfig, LetterConfig, UnitFormSchema } from '../types/ppdb';
+import type { FormField, FormSection, LetterCardFieldConfig, LetterConfig, UnitFormSchema } from '../types/ppdb.ts';
 
 export const CORE_NAME_FIELD_ID = 'fullName';
 

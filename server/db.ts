@@ -33,8 +33,8 @@ import {
   INITIAL_UNIT_CONTACTS,
   INITIAL_LETTER_CONFIGS,
   INITIAL_BANK_ACCOUNTS,
-} from '../src/data/initialData';
-import {
+} from '../src/data/initialData.ts';
+import type {
   StudentRegistration,
   PaymentRecord,
   TestSchedule,
@@ -56,8 +56,8 @@ import {
   TrashEntityType,
   TrashItem,
   BankAccountConfig,
-} from '../src/types/ppdb';
-import { ensureCoreNameFieldInSections, isLockedNameField } from '../src/utils/studentFieldResolver';
+} from '../src/types/ppdb.ts';
+import { ensureCoreNameFieldInSections, isLockedNameField } from '../src/utils/studentFieldResolver.ts';
 
 const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 const STORE_FILE = path.join(DATA_DIR, 'ppdb_store.json');

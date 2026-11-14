@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -8,7 +8,7 @@ import nodemailer from 'nodemailer';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
-import { db, initDatabase, addAuditLog } from './server/db';
+import { db, initDatabase, addAuditLog } from './server/db.ts';
 import {
   getCardBiodataRows,
   ensureCoreNameFieldInSections,
@@ -16,8 +16,8 @@ import {
   resolveStudentNameFromSchema,
   resolveGuardianSummaryFromSchema,
   getActiveAcademicYearLabel,
-} from './src/utils/studentFieldResolver';
-import { MODULE_ACTIONS } from './src/utils/rbac';
+} from './src/utils/studentFieldResolver.ts';
+import { MODULE_ACTIONS } from './src/utils/rbac.ts';
 
 const SERVER_MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = fs.existsSync(path.join(SERVER_MODULE_DIR, 'package.json'))

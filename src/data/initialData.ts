@@ -1,4 +1,4 @@
-import {
+import type {
   StudentRegistration,
   PaymentRecord,
   TestSchedule,
@@ -17,7 +17,7 @@ import {
   UnitContactConfig,
   LetterConfig,
   BankAccountConfig,
-} from '../types/ppdb';
+} from '../types/ppdb.ts';
 
 export const INITIAL_BANK_ACCOUNTS: BankAccountConfig[] = [
   {

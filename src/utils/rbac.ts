@@ -1,4 +1,4 @@
-import { AppUser, UserRole } from '../types/ppdb';
+import type { AppUser, UserRole } from '../types/ppdb.ts';
 
 export type ActionType = 'view' | 'add' | 'edit' | 'delete' | 'verify' | 'export';
 
