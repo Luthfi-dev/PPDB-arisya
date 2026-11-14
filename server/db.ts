@@ -1,9 +1,18 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { fileURLToPath } from 'url';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
+
+const DB_MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT =
+  [DB_MODULE_DIR, path.resolve(DB_MODULE_DIR, '..'), process.cwd()].find((dir) =>
+    fs.existsSync(path.join(dir, 'package.json'))
+  ) || process.cwd();
+
+dotenv.config({ path: path.resolve(PROJECT_ROOT, '.env') });
 dotenv.config();
 import {
   INITIAL_UNITS,
@@ -50,10 +59,10 @@ import {
 } from '../src/types/ppdb';
 import { ensureCoreNameFieldInSections, isLockedNameField } from '../src/utils/studentFieldResolver';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 const STORE_FILE = path.join(DATA_DIR, 'ppdb_store.json');
-const DATA_UPLOADS_DIR = path.resolve(process.cwd(), 'data', 'uploads');
-const PUBLIC_UPLOADS_DIR = path.resolve(process.cwd(), 'public', 'uploads');
+const DATA_UPLOADS_DIR = path.resolve(PROJECT_ROOT, 'data', 'uploads');
+const PUBLIC_UPLOADS_DIR = path.resolve(PROJECT_ROOT, 'public', 'uploads');
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });

@@ -1,37 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { usePPDB } from '../../context/PPDBContext';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
-import { DashboardView } from './views/DashboardView';
-import { PendaftarView } from './views/PendaftarView';
-import { VerifikasiView } from './views/VerifikasiView';
-import { JadwalTesView } from './views/JadwalTesView';
-import { KelulusanView } from './views/KelulusanView';
-import { PembayaranView } from './views/PembayaranView';
-import { LaporanView } from './views/LaporanView';
-import { FormBuilderView } from './views/FormBuilderView';
-import { RoleManagementView } from './views/RoleManagementView';
-import { UsersManagementView } from './views/UsersManagementView';
-import { TahunAjaranView } from './views/TahunAjaranView';
-import { KuotaBiayaView } from './views/KuotaBiayaView';
-import { KelolaLandingView } from './views/KelolaLandingView';
-import { StatusSistemView } from './views/StatusSistemView';
-import { AuditLogView } from './views/AuditLogView';
-import { RealDatabaseView } from './views/RealDatabaseView';
-import { KelolaExportView } from './views/KelolaExportView';
-import { SmtpConfigView } from './views/SmtpConfigView';
-import { KelolaGrupView } from './views/KelolaGrupView';
-import { KelolaKontakView } from './views/KelolaKontakView';
-import { KelolaSuratView } from './views/KelolaSuratView';
-import { QrPendaftaranView } from './views/QrPendaftaranView';
-import { TrashView } from './views/TrashView';
-import { AktivasiPendaftaranView } from './views/AktivasiPendaftaranView';
-import { RekeningYayasanView } from './views/RekeningYayasanView';
-
-import { WaliDashboard } from '../wali/WaliDashboard';
 import { ForbiddenBarrier } from './ForbiddenBarrier';
 import { hasMenuAccess, getDefaultMenuForUser, isMasterUser, isParentUser } from '../../utils/rbac';
 import { DeveloperFooter } from '../common/DeveloperFooter';
+
+const DashboardView = lazy(() => import('./views/DashboardView').then((m) => ({ default: m.DashboardView })));
+const PendaftarView = lazy(() => import('./views/PendaftarView').then((m) => ({ default: m.PendaftarView })));
+const VerifikasiView = lazy(() => import('./views/VerifikasiView').then((m) => ({ default: m.VerifikasiView })));
+const JadwalTesView = lazy(() => import('./views/JadwalTesView').then((m) => ({ default: m.JadwalTesView })));
+const KelulusanView = lazy(() => import('./views/KelulusanView').then((m) => ({ default: m.KelulusanView })));
+const PembayaranView = lazy(() => import('./views/PembayaranView').then((m) => ({ default: m.PembayaranView })));
+const LaporanView = lazy(() => import('./views/LaporanView').then((m) => ({ default: m.LaporanView })));
+const FormBuilderView = lazy(() => import('./views/FormBuilderView').then((m) => ({ default: m.FormBuilderView })));
+const RoleManagementView = lazy(() => import('./views/RoleManagementView').then((m) => ({ default: m.RoleManagementView })));
+const UsersManagementView = lazy(() => import('./views/UsersManagementView').then((m) => ({ default: m.UsersManagementView })));
+const TahunAjaranView = lazy(() => import('./views/TahunAjaranView').then((m) => ({ default: m.TahunAjaranView })));
+const KuotaBiayaView = lazy(() => import('./views/KuotaBiayaView').then((m) => ({ default: m.KuotaBiayaView })));
+const KelolaLandingView = lazy(() => import('./views/KelolaLandingView').then((m) => ({ default: m.KelolaLandingView })));
+const StatusSistemView = lazy(() => import('./views/StatusSistemView').then((m) => ({ default: m.StatusSistemView })));
+const AuditLogView = lazy(() => import('./views/AuditLogView').then((m) => ({ default: m.AuditLogView })));
+const RealDatabaseView = lazy(() => import('./views/RealDatabaseView').then((m) => ({ default: m.RealDatabaseView })));
+const KelolaExportView = lazy(() => import('./views/KelolaExportView').then((m) => ({ default: m.KelolaExportView })));
+const SmtpConfigView = lazy(() => import('./views/SmtpConfigView').then((m) => ({ default: m.SmtpConfigView })));
+const KelolaGrupView = lazy(() => import('./views/KelolaGrupView').then((m) => ({ default: m.KelolaGrupView })));
+const KelolaKontakView = lazy(() => import('./views/KelolaKontakView').then((m) => ({ default: m.KelolaKontakView })));
+const KelolaSuratView = lazy(() => import('./views/KelolaSuratView').then((m) => ({ default: m.KelolaSuratView })));
+const QrPendaftaranView = lazy(() => import('./views/QrPendaftaranView').then((m) => ({ default: m.QrPendaftaranView })));
+const TrashView = lazy(() => import('./views/TrashView').then((m) => ({ default: m.TrashView })));
+const AktivasiPendaftaranView = lazy(() => import('./views/AktivasiPendaftaranView').then((m) => ({ default: m.AktivasiPendaftaranView })));
+const RekeningYayasanView = lazy(() => import('./views/RekeningYayasanView').then((m) => ({ default: m.RekeningYayasanView })));
+const WaliDashboard = lazy(() => import('../wali/WaliDashboard').then((m) => ({ default: m.WaliDashboard })));
+
+const ViewLoaderFallback: React.FC = () => (
+  <div className="flex items-center justify-center py-20">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-8 h-8 rounded-full border-3 border-emerald-200 border-t-emerald-600 animate-spin" />
+      <span className="text-xs font-medium text-slate-500">Memuat modul...</span>
+    </div>
+  </div>
+);
 
 export const DesktopApp: React.FC = () => {
   const {
@@ -67,7 +76,11 @@ export const DesktopApp: React.FC = () => {
   }, [desktopActiveMenu, currentUser, roles]);
 
   if (isParentUser(currentUser)) {
-    return <WaliDashboard />;
+    return (
+      <Suspense fallback={<ViewLoaderFallback />}>
+        <WaliDashboard />
+      </Suspense>
+    );
   }
 
   const getPageInfo = () => {
@@ -298,7 +311,9 @@ export const DesktopApp: React.FC = () => {
         />
 
         <main className="flex-1 overflow-y-auto px-4 pt-4 pb-2 sm:px-6 sm:pt-6 sm:pb-2 lg:px-8 lg:pt-8 lg:pb-2 flex flex-col justify-between">
-          <div className="w-full min-w-0">{renderActiveView()}</div>
+          <div className="w-full min-w-0">
+            <Suspense fallback={<ViewLoaderFallback />}>{renderActiveView()}</Suspense>
+          </div>
           <DeveloperFooter variant="light" className="pt-6 pb-0.5" />
         </main>
       </div>

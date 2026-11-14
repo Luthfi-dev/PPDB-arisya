@@ -103,24 +103,29 @@ export const ExportDropdown: React.FC<ExportDropdownProps> = ({
     showToast(`Data ${title} berhasil diekspor ke Excel! (${finalHeaders.length} kolom sesuai izin)`);
   };
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     setIsOpen(false);
     if (rows.length === 0) {
       showToast('Tidak ada data untuk diekspor ke PDF.', 'error');
       return;
     }
-    const { finalHeaders, finalRows } = getFilteredExportData();
-    const safeFilename = `${filename}_${new Date().toISOString().slice(0, 10)}`;
-    exportToPdf({
-      filename: safeFilename,
-      title,
-      subtitle,
-      headers: finalHeaders,
-      rows: finalRows,
-      unitName: unitName || (activeSchoolId === 'MASTER' ? 'Semua Unit' : activeSchoolId),
-    });
-    addAuditLog('export_data', activeSchoolId, `Ekspor data ${title} ke format dokumen PDF - ${finalHeaders.length} kolom`);
-    showToast(`Dokumen PDF ${title} berhasil dicetak/diunduh! (${finalHeaders.length} kolom sesuai izin)`);
+    try {
+      const { finalHeaders, finalRows } = getFilteredExportData();
+      const safeFilename = `${filename}_${new Date().toISOString().slice(0, 10)}`;
+      await exportToPdf({
+        filename: safeFilename,
+        title,
+        subtitle,
+        headers: finalHeaders,
+        rows: finalRows,
+        unitName: unitName || (activeSchoolId === 'MASTER' ? 'Semua Unit' : activeSchoolId),
+      });
+      addAuditLog('export_data', activeSchoolId, `Ekspor data ${title} ke format dokumen PDF - ${finalHeaders.length} kolom`);
+      showToast(`Dokumen PDF ${title} berhasil dicetak/diunduh! (${finalHeaders.length} kolom sesuai izin)`);
+    } catch (err) {
+      console.error('Export PDF failed:', err);
+      showToast('Gagal membuat dokumen PDF. Silakan coba lagi.', 'error');
+    }
   };
 
   return (

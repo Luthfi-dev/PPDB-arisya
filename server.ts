@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
 import { jsPDF } from 'jspdf';
@@ -18,6 +19,12 @@ import {
 } from './src/utils/studentFieldResolver';
 import { MODULE_ACTIONS } from './src/utils/rbac';
 
+const SERVER_MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = fs.existsSync(path.join(SERVER_MODULE_DIR, 'package.json'))
+  ? SERVER_MODULE_DIR
+  : process.cwd();
+
+dotenv.config({ path: path.resolve(PROJECT_ROOT, '.env') });
 dotenv.config();
 
 const ALL_VALID_PERMISSIONS = new Set<string>(
@@ -873,11 +880,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Persistent uploads directory in data/uploads and public/uploads
-const dataUploadsDir = path.resolve(process.cwd(), 'data', 'uploads');
+const dataUploadsDir = path.resolve(PROJECT_ROOT, 'data', 'uploads');
 if (!fs.existsSync(dataUploadsDir)) {
   fs.mkdirSync(dataUploadsDir, { recursive: true });
 }
-const uploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+const uploadsDir = path.resolve(PROJECT_ROOT, 'public', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -912,7 +919,7 @@ function syncUploadsDirectory() {
 
 // Seed default official crest logo & favicon into persistent storage if not present
 function seedDefaultUploadAssets() {
-  const crestLogoSrc = path.resolve(process.cwd(), 'src', 'assets', 'images', 'logo_arrisalah_crest_1792900905994.jpg');
+  const crestLogoSrc = path.resolve(PROJECT_ROOT, 'src', 'assets', 'images', 'logo_arrisalah_crest_1792900905994.jpg');
   if (fs.existsSync(crestLogoSrc)) {
     const targets = ['logo.png', 'logo.jpg', '1000828600.png'];
     for (const t of targets) {
@@ -5246,19 +5253,53 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 async function startServer() {
   await initDatabase();
 
+  const distPath = fs.existsSync(path.resolve(PROJECT_ROOT, 'dist', 'index.html'))
+    ? path.resolve(PROJECT_ROOT, 'dist')
+    : path.resolve(process.cwd(), 'dist');
+
+  const serveBuiltFrontend = () => {
+    const indexHtmlPath = path.join(distPath, 'index.html');
+    if (!fs.existsSync(indexHtmlPath)) {
+      console.warn(
+        `[PPDB Backend] PERINGATAN: ${indexHtmlPath} belum ditemukan. Jalankan "npm run build" sebelum menjalankan "node server.js".`
+      );
+    }
+    app.use(
+      express.static(distPath, {
+        maxAge: '7d',
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
+      })
+    );
+    app.get('*', (_req: Request, res: Response) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.sendFile(indexHtmlPath);
+    });
+  };
+
   if (!isProd) {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (viteErr) {
+      if (fs.existsSync(path.join(distPath, 'index.html'))) {
+        console.warn('[PPDB Backend] Vite tidak tersedia, beralih ke folder build statis dist/.');
+        serveBuiltFrontend();
+      } else {
+        throw viteErr;
+      }
+    }
   } else {
-    const distPath = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    serveBuiltFrontend();
   }
 
   app.listen(PORT, HOST, () => {

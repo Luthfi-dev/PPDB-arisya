@@ -1,6 +1,4 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import QRCode from 'qrcode';
+import type { jsPDF as JsPdfType } from 'jspdf';
 import { LetterConfig, UnitFormSchema } from '../types/ppdb';
 import { getCardBiodataRows, resolveGuardianSummaryFromSchema, resolveStudentNameFromSchema } from './studentFieldResolver';
 
@@ -59,7 +57,11 @@ export function exportToExcel({ filename, title, headers, rows }: ExportDataOpti
 /**
  * Export data to official formatted PDF document using jsPDF
  */
-export function exportToPdf({ filename, title, subtitle, headers, rows, unitName }: ExportDataOptions) {
+export async function exportToPdf({ filename, title, subtitle, headers, rows, unitName }: ExportDataOptions): Promise<void> {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF({
     orientation: headers.length > 6 ? 'landscape' : 'portrait',
     unit: 'mm',
@@ -198,7 +200,13 @@ export async function generateStudentCardPdf({
   academicYearLabel,
   units,
   download = true,
-}: StudentCardPdfOptions): Promise<{ doc: jsPDF; blob: Blob; dataUri: string }> {
+}: StudentCardPdfOptions): Promise<{ doc: JsPdfType; blob: Blob; dataUri: string }> {
+  const [{ default: jsPDF }, { default: autoTable }, QRCodeModule] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+    import('qrcode'),
+  ]);
+  const QRCode = QRCodeModule.default || QRCodeModule;
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',

@@ -1,16 +1,36 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { PPDBProvider, usePPDB } from './context/PPDBContext';
-import { DesktopApp } from './components/desktop/DesktopApp';
-import { MobileApp } from './components/mobile/MobileApp';
 import { LandingPage } from './components/landing/LandingPage';
-import { LoginModal } from './components/auth/LoginModal';
-import { RegistrationWizard } from './components/mobile/RegistrationWizard';
 import { ToastContainer } from './components/common/Toast';
-import { VerifySignatureModal } from './components/common/VerifySignatureModal';
-import { VerifyReceiptModal } from './components/common/VerifyReceiptModal';
-
 import { isParentUser } from './utils/rbac';
-import { WaliDashboard } from './components/wali/WaliDashboard';
+
+const DesktopApp = lazy(() =>
+  import('./components/desktop/DesktopApp').then((m) => ({ default: m.DesktopApp }))
+);
+const WaliDashboard = lazy(() =>
+  import('./components/wali/WaliDashboard').then((m) => ({ default: m.WaliDashboard }))
+);
+const LoginModal = lazy(() =>
+  import('./components/auth/LoginModal').then((m) => ({ default: m.LoginModal }))
+);
+const RegistrationWizard = lazy(() =>
+  import('./components/mobile/RegistrationWizard').then((m) => ({ default: m.RegistrationWizard }))
+);
+const VerifySignatureModal = lazy(() =>
+  import('./components/common/VerifySignatureModal').then((m) => ({ default: m.VerifySignatureModal }))
+);
+const VerifyReceiptModal = lazy(() =>
+  import('./components/common/VerifyReceiptModal').then((m) => ({ default: m.VerifyReceiptModal }))
+);
+
+const ScreenLoadingFallback: React.FC = () => (
+  <div className="min-h-screen w-full bg-[#f0fdf4] flex items-center justify-center p-6">
+    <div className="flex flex-col items-center gap-3 text-emerald-800">
+      <div className="w-9 h-9 rounded-full border-3 border-emerald-200 border-t-emerald-600 animate-spin" />
+      <p className="text-xs font-semibold tracking-wide text-emerald-700/80">Memuat halaman...</p>
+    </div>
+  </div>
+);
 
 const MainAppContent: React.FC = () => {
   const {
@@ -70,50 +90,9 @@ const MainAppContent: React.FC = () => {
     };
   }, [setLoginModalOpen]);
 
-  // 1. Halaman Depan: PPDB Landing Page Resmi Yayasan Ar-Risalah
-  if (activeView === 'landing' || !currentUser) {
-    return (
-      <div className="min-h-screen w-full bg-[#f0fdf4]">
-        <LandingPage />
-        {loginModalOpen && <LoginModal />}
-        {currentUser && registerWizardOpen && (
-          <RegistrationWizard
-            initialUnit={pendingRegisterUnit || undefined}
-            onClose={() => {
-              setRegisterWizardOpen(false);
-              setPendingRegisterUnit(null);
-            }}
-            onSuccess={(studentName) => {
-              setRegisterWizardOpen(false);
-              setPendingRegisterUnit(null);
-              showToast(`Alhamdulillah, data pendaftaran ananda ${studentName} berhasil dikirim!`);
-            }}
-          />
-        )}
-        {verifyRegNumber !== null && (
-          <VerifySignatureModal
-            initialRegNumber={verifyRegNumber}
-            onClose={() => setVerifyRegNumber(null)}
-          />
-        )}
-        {verifyReceiptParams !== null && (
-          <VerifyReceiptModal
-            initialPaymentId={verifyReceiptParams.pid}
-            initialRegNumber={verifyReceiptParams.reg}
-            initialSignature={verifyReceiptParams.sig}
-            onClose={() => setVerifyReceiptParams(null)}
-          />
-        )}
-        <ToastContainer />
-      </div>
-    );
-  }
-
-  // 2. Akun Wali Siswa / Wali Santri: Langsung diarahkan ke Dashboard Portal Wali
-  if (isParent) {
-    return (
-      <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#f0fdf4]">
-        <WaliDashboard />
+  const sharedOverlays = (
+    <>
+      <Suspense fallback={null}>
         {loginModalOpen && <LoginModal />}
         {registerWizardOpen && (
           <RegistrationWizard
@@ -143,7 +122,29 @@ const MainAppContent: React.FC = () => {
             onClose={() => setVerifyReceiptParams(null)}
           />
         )}
-        <ToastContainer />
+      </Suspense>
+      <ToastContainer />
+    </>
+  );
+
+  // 1. Halaman Depan: PPDB Landing Page Resmi Yayasan Ar-Risalah
+  if (activeView === 'landing' || !currentUser) {
+    return (
+      <div className="min-h-screen w-full bg-[#f0fdf4]">
+        <LandingPage />
+        {sharedOverlays}
+      </div>
+    );
+  }
+
+  // 2. Akun Wali Siswa / Wali Santri: Langsung diarahkan ke Dashboard Portal Wali
+  if (isParent) {
+    return (
+      <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#f0fdf4]">
+        <Suspense fallback={<ScreenLoadingFallback />}>
+          <WaliDashboard />
+        </Suspense>
+        {sharedOverlays}
       </div>
     );
   }
@@ -152,48 +153,11 @@ const MainAppContent: React.FC = () => {
   return (
     <div className="relative min-h-screen w-full max-w-full overflow-x-hidden bg-[#f0fdf4]">
       <div className="h-screen w-full overflow-hidden">
-        <DesktopApp />
+        <Suspense fallback={<ScreenLoadingFallback />}>
+          <DesktopApp />
+        </Suspense>
       </div>
-
-      {/* Modal Autentikasi / Login Resmi PPDB */}
-      {loginModalOpen && <LoginModal />}
-
-      {/* Modal Wizard Pendaftaran Siswa Baru (Online) */}
-      {registerWizardOpen && (
-        <RegistrationWizard
-          initialUnit={pendingRegisterUnit || undefined}
-          onClose={() => {
-            setRegisterWizardOpen(false);
-            setPendingRegisterUnit(null);
-          }}
-          onSuccess={(studentName) => {
-            setRegisterWizardOpen(false);
-            setPendingRegisterUnit(null);
-            showToast(`Alhamdulillah, data pendaftaran ananda ${studentName} berhasil dikirim!`);
-          }}
-        />
-      )}
-
-      {/* Public Online TTD Verification Modal */}
-      {verifyRegNumber !== null && (
-        <VerifySignatureModal
-          initialRegNumber={verifyRegNumber}
-          onClose={() => setVerifyRegNumber(null)}
-        />
-      )}
-
-      {/* Public Online Payment Receipt Verification Modal */}
-      {verifyReceiptParams !== null && (
-        <VerifyReceiptModal
-          initialPaymentId={verifyReceiptParams.pid}
-          initialRegNumber={verifyReceiptParams.reg}
-          initialSignature={verifyReceiptParams.sig}
-          onClose={() => setVerifyReceiptParams(null)}
-        />
-      )}
-
-      {/* Global Toast Notification System */}
-      <ToastContainer />
+      {sharedOverlays}
     </div>
   );
 };
