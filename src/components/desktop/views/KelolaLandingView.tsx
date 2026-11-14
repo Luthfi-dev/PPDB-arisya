@@ -26,6 +26,7 @@ import { hasActionPermission } from '../../../utils/rbac';
 import { PlainNumberInput } from '../../common/FormattedNumberInputs';
 import { compressAndResizeImage } from '../../../utils/imageOptimizer';
 import { apiFetch, getAuthHeaders } from '../../../utils/auth';
+import { getPublicAppUrl } from '../../../utils/appUrl';
 
 export const KelolaLandingView: React.FC = () => {
   const { landingConfig, updateLandingConfig, setActiveView, currentUser, roles, showToast } = usePPDB();
@@ -369,13 +370,14 @@ export const KelolaLandingView: React.FC = () => {
 
   // Generate Default JSON-LD Structured Data
   const handleGenerateDefaultJsonLd = () => {
+    const appOrigin = getPublicAppUrl(landingConfig?.appUrl);
     const jsonLd = {
       '@context': 'https://schema.org',
       '@type': formData.jsonLdType || 'EducationalOrganization',
       name: formData.appName || 'PPDB Ar-Risalah Aceh',
       description: formData.metaDescription || formData.heroSubtitle,
-      url: window.location.origin,
-      logo: window.location.origin + (formData.logoUrl || '/uploads/logo.png'),
+      url: appOrigin,
+      logo: appOrigin + (formData.logoUrl || '/uploads/logo.png'),
       address: {
         '@type': 'PostalAddress',
         streetAddress: formData.contact.address,

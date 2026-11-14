@@ -178,6 +178,7 @@ export interface LandingPageConfig {
   faviconUrl?: string;
   customLogoBase64?: string;
   customFaviconBase64?: string;
+  appUrl?: string;
   metaTitle?: string;
   metaDescription?: string;
   metaKeywords?: string;

@@ -128,7 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
   const isMaster = isMasterUser(currentUser);
   const isSuper = isSuperAdmin(currentUser);
 
-  const logoSrc = landingConfig?.logoUrl || '/uploads/1794360625078_my_new_logo.png';
+  const logoSrc = landingConfig?.logoUrl || '/uploads/logo.png';
   const fallbackInitial = landingConfig?.appName ? landingConfig.appName.charAt(0).toUpperCase() : 'P';
 
   const handleLogout = () => {
@@ -180,6 +180,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
                     <img
                       src={logoSrc}
                       alt="Logo App"
+                      decoding="async"
                       className="w-full h-full object-contain"
                       onError={() => setLogoError(true)}
                     />

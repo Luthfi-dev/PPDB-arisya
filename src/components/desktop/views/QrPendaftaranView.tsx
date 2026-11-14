@@ -19,6 +19,7 @@ import { UnitQuotaFee } from '../../../types/ppdb';
 import { UnitBadge } from '../../common/Badge';
 import { isSuperAdmin } from '../../../utils/rbac';
 import { getActiveAcademicYearLabel } from '../../../utils/studentFieldResolver';
+import { getPublicAppUrl } from '../../../utils/appUrl';
 
 export const QrPendaftaranView: React.FC = () => {
   const {
@@ -58,12 +59,10 @@ export const QrPendaftaranView: React.FC = () => {
     return units;
   }, [units, isGlobalAdmin, currentUser, activeSchoolId]);
 
+  const activeAppOrigin = getPublicAppUrl(landingConfig?.appUrl);
+
   const getShortcutUrl = (unitId: string) => {
-    const origin =
-      typeof window !== 'undefined' && window.location?.origin
-        ? window.location.origin
-        : 'https://ppdb.arrisalahaceh.or.id';
-    return `${origin}/?daftar=${unitId}`;
+    return `${activeAppOrigin}/?daftar=${unitId}`;
   };
 
   // Generate QR Code Data URLs locally using qrcode library
@@ -73,7 +72,7 @@ export const QrPendaftaranView: React.FC = () => {
       const nextMap: Record<string, string> = {};
       for (const unit of visibleUnits) {
         try {
-          const url = getShortcutUrl(unit.id);
+          const url = `${activeAppOrigin}/?daftar=${unit.id}`;
           const dataUrl = await QRCode.toDataURL(url, {
             width: 600,
             margin: 2,
@@ -96,7 +95,7 @@ export const QrPendaftaranView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [visibleUnits]);
+  }, [visibleUnits, activeAppOrigin]);
 
   const handleCopyUrl = (unit: UnitQuotaFee) => {
     const url = getShortcutUrl(unit.id);
@@ -261,7 +260,7 @@ export const QrPendaftaranView: React.FC = () => {
             )}
           </div>
           <p className="text-xs text-slate-500 max-w-2xl leading-relaxed">
-            Bagikan atau cetak QR Code ini sebagai shortcut pendaftaran resmi. Saat dipindai, pendaftar yang belum masuk akan diarahkan ke halaman pembuatan akun wali lalu otomatis menuju formulir unit tujuan. Jika sudah memiliki sesi aktif, formulir pendaftaran unit langsung terbuka.
+            Bagikan atau cetak QR Code ini sebagai shortcut pendaftaran resmi. Saat dipindai, pendaftar yang belum masuk akan diarahkan ke halaman pembuatan akun wali lalu otomatis menuju formulir unit tujuan. Domain aktif QR: <span className="font-mono font-bold text-emerald-700">{activeAppOrigin}</span>
           </p>
         </div>
 
@@ -357,6 +356,7 @@ export const QrPendaftaranView: React.FC = () => {
                     <img
                       src={qrSrc}
                       alt={`QR Code Pendaftaran ${unit.name}`}
+                      decoding="async"
                       className="w-52 h-52 sm:w-56 sm:h-56 object-contain"
                     />
                   ) : (

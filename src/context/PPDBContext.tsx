@@ -23,17 +23,14 @@ import {
 } from '../types/ppdb';
 import { isMasterUser, isParentUser, isSuperAdmin } from '../utils/rbac';
 import { getAuthHeaders, setCsrfToken, clearCsrfToken, purgeLegacyStorageTokens, apiFetch } from '../utils/auth';
+import { setRuntimePublicAppUrl } from '../utils/appUrl';
 import {
   INITIAL_UNITS,
-  INITIAL_STUDENTS,
-  INITIAL_PAYMENTS,
   INITIAL_SCHEDULES,
   INITIAL_FORM_SCHEMAS,
   INITIAL_ROLES,
-  INITIAL_USERS,
   INITIAL_ACADEMIC_YEARS,
   INITIAL_LANDING_CONFIG,
-  INITIAL_AUDIT_LOGS,
   INITIAL_SYSTEM_STATUS,
   INITIAL_EXPORT_CONFIGS,
   INITIAL_SMTP_CONFIG,
@@ -102,6 +99,12 @@ interface PPDBContextType {
   setMobileActiveTab: (tab: 'beranda' | 'anak' | 'pembayaran' | 'admin' | 'profil') => void;
   activeView: 'app' | 'landing';
   setActiveView: (v: 'app' | 'landing') => void;
+  isInitialLoading: boolean;
+  isUserDataLoading: boolean;
+  forgotPasswordSentModal: { email: string; message?: string } | null;
+  setForgotPasswordSentModal: React.Dispatch<
+    React.SetStateAction<{ email: string; message?: string } | null>
+  >;
   
   // Actions
   addStudent: (data: Partial<StudentRegistration>) => Promise<StudentRegistration>;
@@ -191,18 +194,16 @@ const PPDBContext = createContext<PPDBContextType | undefined>(undefined);
 
 export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // All business datasets are hydrated exclusively from the backend/MySQL database.
-  const [students, setStudents] = useState<StudentRegistration[]>(INITIAL_STUDENTS);
-  const [payments, setPayments] = useState<PaymentRecord[]>(INITIAL_PAYMENTS);
+  const [students, setStudents] = useState<StudentRegistration[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [schedules, setSchedules] = useState<TestSchedule[]>(INITIAL_SCHEDULES);
   const [formSchemas, setFormSchemas] = useState<UnitFormSchema[]>(INITIAL_FORM_SCHEMAS);
   const [roles, setRoles] = useState<UserRole[]>(INITIAL_ROLES);
-  const [users, setUsers] = useState<AppUser[]>(() =>
-    INITIAL_USERS.map((u) => ({ ...u, emailVerified: Boolean(u.emailVerified) }))
-  );
+  const [users, setUsers] = useState<AppUser[]>([]);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>(INITIAL_ACADEMIC_YEARS);
   const [units, setUnits] = useState<UnitQuotaFee[]>(INITIAL_UNITS);
   const [landingConfig, setLandingConfig] = useState<LandingPageConfig>(INITIAL_LANDING_CONFIG);
-  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>(INITIAL_AUDIT_LOGS);
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [exportConfigs, setExportConfigs] = useState<ExportFieldConfig[]>(INITIAL_EXPORT_CONFIGS);
   const [smtpConfig, setSmtpConfig] = useState<SmtpConfig>(INITIAL_SMTP_CONFIG);
   const [groupLinks, setGroupLinks] = useState<GroupLinkConfig[]>(INITIAL_GROUP_LINKS);
@@ -211,6 +212,18 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [letterConfigs, setLetterConfigs] = useState<LetterConfig[]>(INITIAL_LETTER_CONFIGS);
   const [bankAccounts, setBankAccounts] = useState<BankAccountConfig[]>([]);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
+  const [isUserDataLoading, setIsUserDataLoading] = useState<boolean>(() => {
+    try {
+      return typeof window !== 'undefined' && Boolean(localStorage.getItem('ppdb_current_user'));
+    } catch {
+      return false;
+    }
+  });
+  const [forgotPasswordSentModal, setForgotPasswordSentModal] = useState<{
+    email: string;
+    message?: string;
+  } | null>(null);
 
   const [systemStatus] = useState<SystemStatusConfig>(INITIAL_SYSTEM_STATUS);
   const [dbStatus, setDbStatus] = useState<DbStatus | null>(null);
@@ -444,12 +457,14 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
     showToast(`Berhasil masuk sebagai ${user.name} (${user.role})`);
     authEpochRef.current += 1;
     justLoggedInAtRef.current = Date.now();
+    setIsUserDataLoading(true);
     setTimeout(() => refreshAllData(), 50);
   };
 
   const logout = () => {
     authEpochRef.current += 1;
     justLoggedInAtRef.current = 0;
+    setIsUserDataLoading(false);
     apiFetch('/api/auth/logout', {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -521,308 +536,249 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const authEpochRef = React.useRef<number>(0);
   const justLoggedInAtRef = React.useRef<number>(0);
 
-  // Fetch all data strictly from Express + MySQL Backend (Database Single Source of Truth)
+  // Fetch all data strictly from Express + MySQL Backend in 2 fast parallel waves
   const refreshAllData = useCallback(async () => {
     const startEpoch = authEpochRef.current;
     lastRefreshAtRef.current = Date.now();
+
+    const fetchJsonSafe = async <T = any>(url: string, hdrs?: Record<string, string>): Promise<{ ok: boolean; data: T | null }> => {
+      try {
+        const res = await apiFetch(url, hdrs ? { headers: hdrs, cache: 'no-store' } : { cache: 'no-store' });
+        if (!res.ok) return { ok: false, data: null };
+        const data = await res.json().catch(() => null);
+        return { ok: true, data };
+      } catch {
+        return { ok: false, data: null };
+      }
+    };
+
     try {
       purgeLegacyStorageTokens();
+      const baseHeaders = getAuthHeaders();
+
+      // WAVE 1: Session verification + public configs fetched concurrently
+      const [
+        meResult,
+        landingResult,
+        unitsResult,
+        yearsResult,
+        bankResult,
+        schedulesResult,
+        rolesResult,
+        cfResult,
+        contactsResult,
+        groupsResult,
+        lettersResult,
+        schemasResult,
+      ] = await Promise.all([
+        fetchJsonSafe<{ csrfToken?: string; user?: AppUser }>('/api/auth/me'),
+        fetchJsonSafe<LandingPageConfig>('/api/landing-config', baseHeaders),
+        fetchJsonSafe<UnitQuotaFee[]>('/api/units', baseHeaders),
+        fetchJsonSafe<AcademicYear[]>('/api/academic-years', baseHeaders),
+        fetchJsonSafe<BankAccountConfig[]>('/api/bank-accounts', baseHeaders),
+        fetchJsonSafe<TestSchedule[]>('/api/schedules', baseHeaders),
+        fetchJsonSafe<UserRole[]>('/api/roles', baseHeaders),
+        fetchJsonSafe<CloudflareConfig>('/api/cloudflare-config', baseHeaders),
+        fetchJsonSafe<UnitContactConfig[]>('/api/unit-contacts', baseHeaders),
+        fetchJsonSafe<GroupLinkConfig[]>('/api/group-links', baseHeaders),
+        fetchJsonSafe<LetterConfig[]>('/api/letter-configs', baseHeaders),
+        fetchJsonSafe<UnitFormSchema[]>('/api/form-schemas', baseHeaders),
+      ]);
+
+      // Ignore stale response if login() or logout() occurred while Wave 1 was in-flight
+      if (startEpoch !== authEpochRef.current) {
+        return;
+      }
 
       let verifiedUser: AppUser | null = null;
-      // 0. Verify active HttpOnly cookie session & sync CSRF token from Server DB (/api/auth/me)
-      try {
-        const meRes = await apiFetch('/api/auth/me', { cache: 'no-store' });
-        // Ignore stale response if login() or logout() occurred while this request was in-flight
+      if (meResult.ok && meResult.data) {
+        justLoggedInAtRef.current = 0;
+        if (meResult.data.csrfToken) {
+          setCsrfToken(meResult.data.csrfToken);
+        }
+        if (meResult.data.user) {
+          verifiedUser = meResult.data.user;
+          setCurrentUser(meResult.data.user);
+          localStorage.setItem('ppdb_current_user', JSON.stringify(meResult.data.user));
+        }
+      } else {
+        const wasJustLoggedIn =
+          justLoggedInAtRef.current > 0 && Date.now() - justLoggedInAtRef.current < 10000;
+        justLoggedInAtRef.current = 0;
+        clearCsrfToken();
+        localStorage.removeItem('ppdb_current_user');
+        localStorage.removeItem('ppdb_active_view');
+        setCurrentUser(null);
+        setTrashItems([]);
+        setActiveView('landing');
+        if (wasJustLoggedIn) {
+          showToast(
+            'Sesi login tidak dapat disimpan karena browser memblokir cookie pada mode iframe. Silakan buka aplikasi di tab baru atau izinkan cookie.',
+            'error'
+          );
+        }
+      }
+
+      if (landingResult.ok && landingResult.data && landingResult.data.appName) {
+        setLandingConfig(landingResult.data);
+        setRuntimePublicAppUrl(landingResult.data.appUrl);
+      }
+
+      const loadedUnits =
+        unitsResult.ok && Array.isArray(unitsResult.data) ? unitsResult.data : [];
+      if (unitsResult.ok && Array.isArray(unitsResult.data)) {
+        setUnits(unitsResult.data);
+      }
+
+      if (yearsResult.ok && Array.isArray(yearsResult.data)) {
+        setAcademicYears(yearsResult.data);
+      }
+      if (bankResult.ok && Array.isArray(bankResult.data)) {
+        setBankAccounts(bankResult.data);
+      }
+      if (schedulesResult.ok && Array.isArray(schedulesResult.data)) {
+        setSchedules(schedulesResult.data);
+      }
+      if (rolesResult.ok && Array.isArray(rolesResult.data) && rolesResult.data.length > 0) {
+        const rList = rolesResult.data;
+        setRoles(rList);
+        setCurrentUser((curr) => {
+          if (!curr) return null;
+          const matchedRole = rList.find(
+            (r: UserRole) =>
+              r.name === curr.role ||
+              r.id === curr.role ||
+              (curr.email === 'adminyys@dev.com' &&
+                (r.id === 'role-admin-yys' ||
+                  (r.name.includes('Admin Yayasan') && !r.name.includes('Super')))) ||
+              (curr.email === 'master@dev.com' &&
+                (r.id === 'role-master' || r.name.includes('Super Admin')))
+          );
+          if (matchedRole && Array.isArray(matchedRole.permissions)) {
+            const updatedCurr = { ...curr, permissions: [...matchedRole.permissions] };
+            localStorage.setItem('ppdb_current_user', JSON.stringify(updatedCurr));
+            return updatedCurr;
+          }
+          return curr;
+        });
+      }
+      if (cfResult.ok && cfResult.data && typeof cfResult.data === 'object') {
+        const cfData = cfResult.data;
+        setCloudflareConfig((prev) => ({
+          ...prev,
+          ...cfData,
+          secretKey:
+            cfData.secretKey !== undefined && cfData.secretKey !== ''
+              ? cfData.secretKey
+              : prev.secretKey,
+        }));
+      }
+      if (contactsResult.ok && Array.isArray(contactsResult.data) && contactsResult.data.length > 0) {
+        setUnitContacts(contactsResult.data);
+      }
+      if (groupsResult.ok && Array.isArray(groupsResult.data) && groupsResult.data.length > 0) {
+        setGroupLinks(groupsResult.data);
+      }
+      if (lettersResult.ok && Array.isArray(lettersResult.data) && lettersResult.data.length > 0) {
+        setLetterConfigs(lettersResult.data);
+      }
+      if (schemasResult.ok && Array.isArray(schemasResult.data) && schemasResult.data.length > 0) {
+        const validSchemas = schemasResult.data
+          .filter((s: UnitFormSchema) => Boolean(s && s.unitId && Array.isArray(s.sections)))
+          .sort((a: UnitFormSchema, b: UnitFormSchema) => {
+            const ia = loadedUnits.findIndex((u) => u.id === a.unitId);
+            const ib = loadedUnits.findIndex((u) => u.id === b.unitId);
+            return (ia >= 0 ? ia : 99) - (ib >= 0 ? ib : 99);
+          });
+        if (validSchemas.length > 0) {
+          setFormSchemas(validSchemas);
+        }
+      }
+
+      // WAVE 2: Protected user/staff endpoints fetched concurrently according to role
+      if (verifiedUser) {
+        setIsUserDataLoading(true);
+        const authedHeaders = getAuthHeaders();
+        const isParent = isParentUser(verifiedUser);
+        const isSuper = isSuperAdmin(verifiedUser);
+
+        const [
+          studentsResult,
+          paymentsResult,
+          auditResult,
+          usersResult,
+          smtpResult,
+          exportResult,
+          dbStatusResult,
+          trashResult,
+        ] = await Promise.all([
+          fetchJsonSafe<StudentRegistration[]>('/api/students', authedHeaders),
+          fetchJsonSafe<PaymentRecord[]>('/api/payments', authedHeaders),
+          !isParent ? fetchJsonSafe<AuditLogItem[]>('/api/audit-logs', authedHeaders) : Promise.resolve({ ok: false, data: null }),
+          !isParent ? fetchJsonSafe<AppUser[]>('/api/users', authedHeaders) : Promise.resolve({ ok: false, data: null }),
+          !isParent ? fetchJsonSafe<SmtpConfig>('/api/smtp-config', authedHeaders) : Promise.resolve({ ok: false, data: null }),
+          !isParent ? fetchJsonSafe<ExportFieldConfig[]>('/api/export-configs', authedHeaders) : Promise.resolve({ ok: false, data: null }),
+          !isParent ? fetchJsonSafe<DbStatus>('/api/db-status', authedHeaders) : Promise.resolve({ ok: false, data: null }),
+          isSuper ? fetchJsonSafe<TrashItem[]>('/api/trash', authedHeaders) : Promise.resolve({ ok: false, data: null }),
+        ]);
+
         if (startEpoch !== authEpochRef.current) {
           return;
         }
-        if (meRes.ok) {
-          const meData = await meRes.json();
-          justLoggedInAtRef.current = 0;
-          if (meData.csrfToken) {
-            setCsrfToken(meData.csrfToken);
-          }
-          if (meData.user) {
-            verifiedUser = meData.user;
-            setCurrentUser(meData.user);
-            localStorage.setItem('ppdb_current_user', JSON.stringify(meData.user));
-          }
-        } else {
-          const wasJustLoggedIn =
-            justLoggedInAtRef.current > 0 && Date.now() - justLoggedInAtRef.current < 10000;
-          justLoggedInAtRef.current = 0;
-          clearCsrfToken();
-          localStorage.removeItem('ppdb_current_user');
-          localStorage.removeItem('ppdb_active_view');
-          setCurrentUser(null);
+
+        if (studentsResult.ok && Array.isArray(studentsResult.data)) {
+          setStudents(studentsResult.data);
+        }
+        if (paymentsResult.ok && Array.isArray(paymentsResult.data)) {
+          setPayments(paymentsResult.data);
+        }
+        if (auditResult.ok && Array.isArray(auditResult.data)) {
+          setAuditLogs(auditResult.data);
+        }
+        if (usersResult.ok && Array.isArray(usersResult.data)) {
+          const uList = usersResult.data;
+          setUsers(uList);
+          setCurrentUser((curr) => {
+            if (!curr) return null;
+            const dbUser =
+              uList.find((u: AppUser) => u.id === curr.id) ||
+              uList.find((u: AppUser) => u.email.toLowerCase() === curr.email.toLowerCase());
+            if (dbUser) {
+              const updatedCurr = { ...curr, ...dbUser };
+              localStorage.setItem('ppdb_current_user', JSON.stringify(updatedCurr));
+              return updatedCurr;
+            }
+            return curr;
+          });
+        }
+        if (smtpResult.ok && smtpResult.data && typeof smtpResult.data === 'object') {
+          setSmtpConfig(smtpResult.data);
+        }
+        if (exportResult.ok && Array.isArray(exportResult.data) && exportResult.data.length > 0) {
+          setExportConfigs(exportResult.data);
+        }
+        if (dbStatusResult.ok && dbStatusResult.data) {
+          setDbStatus(dbStatusResult.data);
+        }
+        if (isSuper && trashResult.ok && Array.isArray(trashResult.data)) {
+          setTrashItems(trashResult.data);
+        } else if (!isSuper) {
           setTrashItems([]);
-          setActiveView('landing');
-          if (wasJustLoggedIn) {
-            showToast(
-              'Sesi login tidak dapat disimpan karena browser memblokir cookie pada mode iframe. Silakan buka aplikasi di tab baru atau izinkan cookie.',
-              'error'
-            );
-          }
         }
-      } catch (e) {}
-
-      const headers = getAuthHeaders();
-
-      // 0b. Prioritize Yayasan Multi-Bank Accounts immediately so Wali & Wizard never flash stale bank info
-      try {
-        const baRes = await apiFetch('/api/bank-accounts', { headers, cache: 'no-store' });
-        if (baRes.ok) {
-          const baData = await baRes.json();
-          if (Array.isArray(baData)) {
-            setBankAccounts(baData);
-          }
-        }
-      } catch (e) {}
-
-      // 1. DB Status
-      try {
-        const dbRes = await apiFetch('/api/db-status', { headers, cache: 'no-store' });
-        if (dbRes.ok) {
-          const d = await dbRes.json();
-          setDbStatus(d);
-        }
-      } catch (e) {}
-
-      // 2 & 3. Protected Students & Payments (only when authenticated via verified HttpOnly session)
-      if (verifiedUser) {
-        try {
-          const sRes = await apiFetch('/api/students', { headers, cache: 'no-store' });
-          if (sRes.ok) {
-            const s = await sRes.json();
-            if (Array.isArray(s)) setStudents(s);
-          }
-        } catch (e) {}
-
-        try {
-          const pRes = await apiFetch('/api/payments', { headers, cache: 'no-store' });
-          if (pRes.ok) {
-            const p = await pRes.json();
-            if (Array.isArray(p)) setPayments(p);
-          }
-        } catch (e) {}
       } else {
         setStudents([]);
         setPayments([]);
-      }
-
-      // 4. Schedules
-      try {
-        const scRes = await apiFetch('/api/schedules', { headers, cache: 'no-store' });
-        if (scRes.ok) {
-          const sc = await scRes.json();
-          if (Array.isArray(sc)) setSchedules(sc);
-        }
-      } catch (e) {}
-
-      // 5. Units
-      try {
-        const uRes = await apiFetch('/api/units', { headers, cache: 'no-store' });
-        if (uRes.ok) {
-          const u = await uRes.json();
-          if (Array.isArray(u)) setUnits(u);
-        }
-      } catch (e) {}
-
-      // 6. Academic Years
-      try {
-        const ayRes = await apiFetch('/api/academic-years', { headers, cache: 'no-store' });
-        if (ayRes.ok) {
-          const ay = await ayRes.json();
-          if (Array.isArray(ay)) setAcademicYears(ay);
-        }
-      } catch (e) {}
-
-      // 7. Landing Config
-      try {
-        const lRes = await apiFetch('/api/landing-config', { headers, cache: 'no-store' });
-        if (lRes.ok) {
-          const l = await lRes.json();
-          if (l && l.appName) setLandingConfig(l);
-        }
-      } catch (e) {}
-
-      // 8. Audit Logs (protected)
-      if (verifiedUser) {
-        try {
-          const aRes = await apiFetch('/api/audit-logs', { headers, cache: 'no-store' });
-          if (aRes.ok) {
-            const a = await aRes.json();
-            if (Array.isArray(a)) setAuditLogs(a);
-          }
-        } catch (e) {}
-      } else {
         setAuditLogs([]);
-      }
-
-      // 9. Roles & Dynamic Access Sync
-      try {
-        const rRes = await apiFetch('/api/roles', { headers, cache: 'no-store' });
-        if (rRes.ok) {
-          const rList = await rRes.json();
-          if (Array.isArray(rList) && rList.length > 0) {
-            setRoles(rList);
-            setCurrentUser((curr) => {
-              if (!curr) return null;
-              const matchedRole = rList.find(
-                (r: UserRole) =>
-                  r.name === curr.role ||
-                  r.id === curr.role ||
-                  (curr.email === 'adminyys@dev.com' && (r.id === 'role-admin-yys' || (r.name.includes('Admin Yayasan') && !r.name.includes('Super')))) ||
-                  (curr.email === 'master@dev.com' && (r.id === 'role-master' || r.name.includes('Super Admin')))
-              );
-              if (matchedRole && Array.isArray(matchedRole.permissions)) {
-                const updatedCurr = { ...curr, permissions: [...matchedRole.permissions] };
-                localStorage.setItem('ppdb_current_user', JSON.stringify(updatedCurr));
-                return updatedCurr;
-              }
-              return curr;
-            });
-          }
-        }
-      } catch (e) {}
-
-      // 10. Users (Database Single Source of Truth & CurrentUser sync - protected)
-      if (verifiedUser) {
-        try {
-          const usrRes = await apiFetch('/api/users', { headers, cache: 'no-store' });
-          if (usrRes.ok) {
-            const uList = await usrRes.json();
-            if (Array.isArray(uList)) {
-              setUsers(uList);
-              setCurrentUser((curr) => {
-                if (!curr) return null;
-                const dbUser = uList.find((u: AppUser) => u.id === curr.id) || uList.find((u: AppUser) => u.email.toLowerCase() === curr.email.toLowerCase());
-                if (dbUser) {
-                  const updatedCurr = { ...curr, ...dbUser };
-                  localStorage.setItem('ppdb_current_user', JSON.stringify(updatedCurr));
-                  return updatedCurr;
-                }
-                return curr;
-              });
-            }
-          }
-        } catch (e) {}
-      } else {
         setUsers([]);
-      }
-
-      // 11. SMTP Config (Admin protected)
-      if (verifiedUser) {
-        try {
-          const smtpRes = await apiFetch('/api/smtp-config', { headers, cache: 'no-store' });
-          if (smtpRes.ok) {
-            const sConf = await smtpRes.json();
-            if (sConf && typeof sConf === 'object') {
-              setSmtpConfig(sConf);
-            }
-          }
-        } catch (e) {}
-      }
-
-      // 12. Group Links Config
-      try {
-        const glRes = await apiFetch('/api/group-links', { headers, cache: 'no-store' });
-        if (glRes.ok) {
-          const glData = await glRes.json();
-          if (Array.isArray(glData) && glData.length > 0) {
-            setGroupLinks(glData);
-          }
-        }
-      } catch (e) {}
-
-      // 13. Export Field Configs
-      try {
-        const expRes = await apiFetch('/api/export-configs', { headers, cache: 'no-store' });
-        if (expRes.ok) {
-          const expData = await expRes.json();
-          if (Array.isArray(expData) && expData.length > 0) {
-            setExportConfigs(expData);
-          }
-        }
-      } catch (e) {}
-
-      // 14. Cloudflare Turnstile Config
-      try {
-        const cfRes = await apiFetch('/api/cloudflare-config', { headers, cache: 'no-store' });
-        if (cfRes.ok) {
-          const cfData = await cfRes.json();
-          if (cfData && typeof cfData === 'object') {
-            setCloudflareConfig((prev) => ({
-              ...prev,
-              ...cfData,
-              secretKey: cfData.secretKey !== undefined && cfData.secretKey !== '' ? cfData.secretKey : prev.secretKey,
-            }));
-          }
-        }
-      } catch (e) {}
-
-      // 15. Unit Contacts Config
-      try {
-        const ucRes = await apiFetch('/api/unit-contacts', { headers, cache: 'no-store' });
-        if (ucRes.ok) {
-          const ucData = await ucRes.json();
-          if (Array.isArray(ucData) && ucData.length > 0) {
-            setUnitContacts(ucData);
-          }
-        }
-      } catch (e) {}
-
-      // 16. Letter Configs
-      try {
-        const lcRes = await apiFetch('/api/letter-configs', { headers, cache: 'no-store' });
-        if (lcRes.ok) {
-          const lcData = await lcRes.json();
-          if (Array.isArray(lcData) && lcData.length > 0) {
-            setLetterConfigs(lcData);
-          }
-        }
-      } catch (e) {}
-
-      // (Bank Accounts already prioritized at step 0b)
-
-      // 17. Form Schemas (Dynamic Form Builder definitions per unit)
-      let latestUnitsSnapshot: UnitQuotaFee[] = [];
-      setUnits((curr) => {
-        latestUnitsSnapshot = curr;
-        return curr;
-      });
-      try {
-        const fsRes = await apiFetch('/api/form-schemas', { headers, cache: 'no-store' });
-        if (fsRes.ok) {
-          const fsData = await fsRes.json();
-          if (Array.isArray(fsData) && fsData.length > 0) {
-            const validSchemas = fsData
-              .filter((s: UnitFormSchema) => Boolean(s && s.unitId && Array.isArray(s.sections)))
-              .sort((a: UnitFormSchema, b: UnitFormSchema) => {
-                const ia = latestUnitsSnapshot.findIndex((u) => u.id === a.unitId);
-                const ib = latestUnitsSnapshot.findIndex((u) => u.id === b.unitId);
-                return (ia >= 0 ? ia : 99) - (ib >= 0 ? ib : 99);
-              });
-            if (validSchemas.length > 0) {
-              setFormSchemas(validSchemas);
-            }
-          }
-        }
-      } catch (e) {}
-      // 18. Trash / Sampah Items (Super Admin Yayasan ONLY)
-      if (verifiedUser && isSuperAdmin(verifiedUser)) {
-        try {
-          const trRes = await apiFetch('/api/trash', { headers, cache: 'no-store' });
-          if (trRes.ok) {
-            const trData = await trRes.json();
-            if (Array.isArray(trData)) setTrashItems(trData);
-          }
-        } catch (e) {}
-      } else {
         setTrashItems([]);
       }
     } catch (err) {
       console.error('[PPDB Frontend] Gagal menyinkronkan data dari server:', err);
+    } finally {
+      if (startEpoch === authEpochRef.current) {
+        setIsInitialLoading(false);
+        setIsUserDataLoading(false);
+      }
     }
   }, []);
 
@@ -1409,7 +1365,8 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
         showToast(errJson.error || 'Gagal menyimpan verifikasi pembayaran ke database.', 'error');
         return false;
       }
-      const updated = await res.json().catch(() => null);
+      const resJson = await res.json().catch(() => null);
+      const { emailNotification, ...updated } = resJson && typeof resJson === 'object' ? resJson : ({} as any);
       setPayments((prev) =>
         prev.map((p) => {
           if (p.id === paymentId) {
@@ -1426,7 +1383,19 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return p;
         })
       );
-      showToast(approved ? 'Bukti transfer diverifikasi (LUNAS)' : 'Bukti transfer ditolak');
+      if (approved) {
+        showToast('Bukti transfer diverifikasi (LUNAS)');
+      } else if (emailNotification?.sent) {
+        showToast(
+          `Bukti transfer ditolak & email pemberitahuan terkirim ke wali (${emailNotification.recipientMasked || 'email terdaftar'}).`
+        );
+      } else if (emailNotification && !emailNotification.sent) {
+        showToast(
+          `Bukti transfer ditolak. Email ke wali tidak terkirim: ${emailNotification.error || 'SMTP belum aktif / email tidak tersedia'}`
+        );
+      } else {
+        showToast('Bukti transfer ditolak');
+      }
       return true;
     } catch (e) {
       showToast('Gagal terhubung ke server saat memverifikasi pembayaran.', 'error');
@@ -1485,6 +1454,7 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return false;
       }
       const resData = await res.json().catch(() => ({}));
+      const emailNotification = resData?.emailNotification;
       const updatedList: PaymentRecord[] = Array.isArray(resData.payments) ? resData.payments : [];
       const updatedMap = new Map(updatedList.map((u) => [u.id, u]));
       const idSet = new Set(paymentIds);
@@ -1503,11 +1473,19 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return p;
         })
       );
-      showToast(
-        approved
-          ? `${paymentIds.length} bukti pembayaran diverifikasi (LUNAS)`
-          : `${paymentIds.length} bukti pembayaran ditolak`
-      );
+      if (approved) {
+        showToast(`${paymentIds.length} bukti pembayaran diverifikasi (LUNAS)`);
+      } else if (emailNotification?.sent) {
+        showToast(
+          `${paymentIds.length} bukti pembayaran ditolak & email pemberitahuan terkirim ke wali (${emailNotification.recipientMasked || 'email terdaftar'}).`
+        );
+      } else if (emailNotification && !emailNotification.sent) {
+        showToast(
+          `${paymentIds.length} bukti pembayaran ditolak. Email ke wali tidak terkirim: ${emailNotification.error || 'SMTP belum aktif / email tidak tersedia'}`
+        );
+      } else {
+        showToast(`${paymentIds.length} bukti pembayaran ditolak`);
+      }
       return true;
     } catch (e) {
       showToast('Gagal terhubung ke server saat memverifikasi pembayaran.', 'error');
@@ -2129,7 +2107,9 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const updated = await res.json().catch(() => config);
-      setLandingConfig(updated && updated.appName ? updated : config);
+      const nextCfg = updated && updated.appName ? updated : config;
+      setLandingConfig(nextCfg);
+      setRuntimePublicAppUrl((nextCfg as any)?.appUrl);
       if (isSuperAdmin(currentUser)) refreshTrashItems();
       showToast('Pengaturan landing page berhasil disimpan ke database!');
       return true;
@@ -2615,6 +2595,10 @@ export const PPDBProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setMobileActiveTab,
         activeView,
         setActiveView,
+        isInitialLoading,
+        isUserDataLoading,
+        forgotPasswordSentModal,
+        setForgotPasswordSentModal,
         addStudent,
         updateStudent,
         deleteStudent,

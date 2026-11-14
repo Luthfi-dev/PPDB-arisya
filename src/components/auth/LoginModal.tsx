@@ -39,6 +39,7 @@ export const LoginModal: React.FC = () => {
     showToast,
     cloudflareConfig,
     landingConfig,
+    setForgotPasswordSentModal,
   } = usePPDB();
 
   const activeAcademicYearLabel = getActiveAcademicYearLabel(academicYears);
@@ -131,7 +132,7 @@ export const LoginModal: React.FC = () => {
     setLogoError(false);
   }, [landingConfig?.logoUrl]);
 
-  const logoSrc = landingConfig?.logoUrl || '/uploads/1794360625078_my_new_logo.png';
+  const logoSrc = landingConfig?.logoUrl || '/uploads/logo.png';
   const fallbackInitial = landingConfig?.appName ? landingConfig.appName.charAt(0).toUpperCase() : 'P';
 
   // Turnstile security state
@@ -290,11 +291,15 @@ export const LoginModal: React.FC = () => {
         setErrorMessage(data.error || 'Gagal memproses permintaan reset kata sandi.');
         resetTurnstileWidgets();
       } else {
-        setSuccessMessage(
-          data.message ||
-            'Jika alamat email tersebut terdaftar dan aktif, tautan reset kata sandi sekali pakai telah dikirimkan (berlaku 15 menit).'
-        );
+        setForgotEmail('');
+        setErrorMessage('');
+        setSuccessMessage('');
         resetTurnstileWidgets();
+        setLoginModalOpen(false);
+        setForgotPasswordSentModal({
+          email: cleanEmail,
+          message: data.message,
+        });
       }
     } catch (err) {
       setErrorMessage('Gagal terhubung ke server untuk mengirim permintaan reset kata sandi.');
@@ -391,6 +396,8 @@ export const LoginModal: React.FC = () => {
                 <img
                   src={logoSrc}
                   alt="Logo"
+                  decoding="async"
+                  className="w-full h-full object-contain"
                   onError={() => setLogoError(true)}
                 />
               ) : (

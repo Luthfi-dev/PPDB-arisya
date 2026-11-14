@@ -35,6 +35,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
         paymentId: receipt.paymentId,
         registrationNumber: receipt.registrationNumber,
         receiptSig: receipt.receiptSig,
+        appUrl: receipt.appUrl,
       })
     : '';
 

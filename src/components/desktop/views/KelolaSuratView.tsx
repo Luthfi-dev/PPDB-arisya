@@ -21,6 +21,7 @@ import { usePPDB } from '../../../context/PPDBContext';
 import { SchoolId, LetterConfig, LetterCardFieldConfig } from '../../../types/ppdb';
 import { isSuperAdmin, isMasterUser } from '../../../utils/rbac';
 import { getActiveAcademicYearLabel, getDefaultCardFieldsFromSchema } from '../../../utils/studentFieldResolver';
+import { getPublicAppUrl } from '../../../utils/appUrl';
 
 interface SearchableFormFieldOption {
   fieldId: string;
@@ -246,7 +247,7 @@ export const KelolaSuratView: React.FC = () => {
   // Local QR generator for Live Preview
   useEffect(() => {
     let cancelled = false;
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://ppdb.arrisalahaceh.or.id';
+    const baseUrl = getPublicAppUrl(landingConfig?.appUrl);
     const verifyUrl = `${baseUrl}/#verify-ttd?reg=${encodeURIComponent(`PPDB-${sampleRegYear}-${selectedUnit}-088`)}`;
     QRCode.toDataURL(verifyUrl, {
       width: 120,
@@ -262,7 +263,7 @@ export const KelolaSuratView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedUnit, sampleRegYear]);
+  }, [selectedUnit, sampleRegYear, landingConfig?.appUrl]);
 
   const filteredSearchOptions = useMemo(() => {
     const q = fieldSearchQuery.trim().toLowerCase();

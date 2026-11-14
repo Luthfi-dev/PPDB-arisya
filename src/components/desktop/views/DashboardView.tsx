@@ -14,6 +14,7 @@ import { usePPDB } from '../../../context/PPDBContext';
 import { StatusBadge, UnitBadge } from '../../common/Badge';
 import { Modal } from '../../common/Modal';
 import { canManageUnitQr } from '../../../utils/rbac';
+import { DashboardSkeleton } from '../../common/Skeleton';
 import {
   ensureCoreNameFieldInSections,
   getActiveAcademicYearLabel,
@@ -33,6 +34,7 @@ export const DashboardView: React.FC = () => {
     showToast,
     currentUser,
     roles,
+    isUserDataLoading,
   } = usePPDB();
 
   const getNormalizedSchema = (unitId: string) => {
@@ -224,6 +226,10 @@ export const DashboardView: React.FC = () => {
 
   const unitVerified = unitStudents.filter((s) => s.status === 'tes' || s.status === 'lulus' || s.status === 'terdaftar').length;
   const unitLulus = unitStudents.filter((s) => s.status === 'lulus' || s.status === 'terdaftar').length;
+
+  if (isUserDataLoading && students.length === 0) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="space-y-6">

@@ -1,5 +1,6 @@
 import QRCode from 'qrcode';
 import { formatRupiah } from './paymentHelpers';
+import { getPublicAppUrl } from './appUrl';
 
 export interface ReceiptTrancheItem {
   id: string;
@@ -29,6 +30,7 @@ export interface ReceiptData {
   logoUrl?: string;
   contactAddress?: string;
   contactPhone?: string;
+  appUrl?: string;
   tranches?: ReceiptTrancheItem[];
 }
 
@@ -36,11 +38,9 @@ export function buildReceiptVerifyUrl(params: {
   paymentId: string;
   registrationNumber: string;
   receiptSig?: string;
+  appUrl?: string;
 }): string {
-  const baseUrl =
-    typeof window !== 'undefined' && window.location?.origin
-      ? window.location.origin
-      : 'https://ppdb.arrisalahaceh.or.id';
+  const baseUrl = getPublicAppUrl(params.appUrl);
   const query = new URLSearchParams();
   query.set('pid', params.paymentId || '');
   if (params.registrationNumber) {
@@ -127,6 +127,7 @@ export async function downloadReceiptAsJpg(data: ReceiptData): Promise<void> {
     paymentId: data.paymentId,
     registrationNumber: data.registrationNumber,
     receiptSig: data.receiptSig,
+    appUrl: data.appUrl,
   });
 
   const qrDataUrl = await QRCode.toDataURL(verifyUrl, {

@@ -1,6 +1,7 @@
 import type { jsPDF as JsPdfType } from 'jspdf';
 import { LetterConfig, UnitFormSchema } from '../types/ppdb';
 import { getCardBiodataRows, resolveGuardianSummaryFromSchema, resolveStudentNameFromSchema } from './studentFieldResolver';
+import { getPublicAppUrl } from './appUrl';
 
 export interface ExportDataOptions {
   filename: string;
@@ -170,6 +171,7 @@ export interface StudentCardPdfOptions {
   } | null;
   landingConfig?: {
     appName?: string;
+    appUrl?: string;
     contact?: {
       address?: string;
       phone?: string;
@@ -438,8 +440,8 @@ export async function generateStudentCardPdf({
   doc.text(`${locationText}, ${issueDateText}`, pageWidth - 40, sigY, { align: 'center' });
   doc.text(`${chairTitleText},`, pageWidth - 40, sigY + 4.5, { align: 'center' });
 
-  // Generate QR Code for online verification
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://ppdb.arrisalahaceh.or.id';
+  // Generate QR Code for online verification using APP_URL from server .env
+  const baseUrl = getPublicAppUrl(landingConfig?.appUrl);
   const verifyUrl = `${baseUrl}/#verify-ttd?reg=${encodeURIComponent(student.registrationNumber || '')}`;
 
   let qrDataUrl = '';

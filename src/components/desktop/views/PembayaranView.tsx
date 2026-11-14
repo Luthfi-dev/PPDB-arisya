@@ -16,6 +16,7 @@ import { Pagination } from '../../common/Pagination';
 import { PaymentRecord, PaymentType } from '../../../types/ppdb';
 import { hasActionPermission, canManageBankAccounts } from '../../../utils/rbac';
 import { ExportDropdown } from '../../common/ExportDropdown';
+import { TableRowsSkeleton } from '../../common/Skeleton';
 import {
   ensureCoreNameFieldInSections,
   getActiveAcademicYearLabel,
@@ -65,6 +66,7 @@ export const PembayaranView: React.FC = () => {
     bankAccounts,
     setDesktopActiveMenu,
     showToast,
+    isUserDataLoading,
   } = usePPDB();
 
   const [activeReceiptData, setActiveReceiptData] = useState<ReceiptData | null>(null);
@@ -481,7 +483,9 @@ export const PembayaranView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredGroups.length === 0 ? (
+              {(isUserDataLoading || isRefreshing) && payments.length === 0 ? (
+                <TableRowsSkeleton rows={5} cols={8} />
+              ) : filteredGroups.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-400">
                     Tidak ada catatan pembayaran yang cocok dengan filter.
@@ -551,6 +555,8 @@ export const PembayaranView: React.FC = () => {
                                     key={rec.id}
                                     src={rec.proofUrl}
                                     alt={`Bukti ${rIdx + 1}`}
+                                    loading="lazy"
+                                    decoding="async"
                                     className="w-8 h-8 rounded-lg object-cover border border-white shadow-2xs group-hover:scale-105 transition-transform"
                                   />
                                 )
@@ -742,6 +748,8 @@ export const PembayaranView: React.FC = () => {
                           <img
                             src={rec.proofUrl}
                             alt={`Bukti Transfer #${idx + 1}`}
+                            loading="lazy"
+                            decoding="async"
                             className="max-h-[36vh] w-auto object-contain rounded-lg"
                           />
                         )}

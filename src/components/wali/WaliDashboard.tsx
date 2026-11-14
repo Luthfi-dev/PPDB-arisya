@@ -58,6 +58,8 @@ import { PaymentReceiptModal } from '../common/PaymentReceiptModal';
 import { ReceiptData } from '../../utils/receiptGenerator';
 import { CurrencyInput } from '../common/FormattedNumberInputs';
 import { DeveloperFooter } from '../common/DeveloperFooter';
+import { WaliDashboardSkeleton } from '../common/Skeleton';
+import { getPublicAppUrl } from '../../utils/appUrl';
 
 export const WaliDashboard: React.FC = () => {
   const {
@@ -88,6 +90,8 @@ export const WaliDashboard: React.FC = () => {
     verifyEmailVerificationOtp,
     sendRegistrationEmailIfVerified,
     updateUser,
+    isInitialLoading,
+    isUserDataLoading,
   } = usePPDB();
 
   const activeBankAccounts = React.useMemo(
@@ -107,7 +111,7 @@ export const WaliDashboard: React.FC = () => {
     setLogoError(false);
   }, [landingConfig?.logoUrl]);
 
-  const logoSrc = landingConfig?.logoUrl || '/uploads/1794360625078_my_new_logo.png';
+  const logoSrc = landingConfig?.logoUrl || '/uploads/logo.png';
   const fallbackInitial = landingConfig?.appName ? landingConfig.appName.charAt(0).toUpperCase() : 'P';
 
   // Multi-anak: Filter & SORT so NEWEST registered child is ALWAYS AT THE VERY TOP
@@ -132,13 +136,7 @@ export const WaliDashboard: React.FC = () => {
       return getTs(b) - getTs(a);
     });
 
-  // Always keep Form Builder schemas, test schedules, bank accounts, and payments synced with backend/MySQL
-  useEffect(() => {
-    refreshFormSchemas();
-    refreshSchedules();
-    refreshBankAccounts();
-    refreshPayments();
-  }, [refreshFormSchemas, refreshSchedules, refreshBankAccounts, refreshPayments]);
+  // Data formSchemas, schedules, bankAccounts, and payments are synced concurrently by PPDBContext
 
   const [copiedBank, setCopiedBank] = useState(false);
   const [selectedDetailStudent, setSelectedDetailStudent] = useState<StudentRegistration | null>(null);
@@ -200,6 +198,7 @@ export const WaliDashboard: React.FC = () => {
       receiptSig: paymentRec.receiptSig,
       appName: landingConfig?.appName,
       logoUrl: landingConfig?.logoUrl,
+      appUrl: landingConfig?.appUrl,
       tranches: lunasTranches,
     });
   };
@@ -210,7 +209,7 @@ export const WaliDashboard: React.FC = () => {
       setPrintQrDataUrl('');
       return;
     }
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://ppdb.arrisalahaceh.or.id';
+    const baseUrl = getPublicAppUrl(landingConfig?.appUrl);
     const verifyUrl = `${baseUrl}/#verify-ttd?reg=${encodeURIComponent(selectedPrintStudent.registrationNumber || '')}`;
     QRCode.toDataURL(verifyUrl, {
       width: 160,
@@ -226,7 +225,7 @@ export const WaliDashboard: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedPrintStudent]);
+  }, [selectedPrintStudent, landingConfig?.appUrl]);
 
   const setEditFieldValue = (fieldId: string, value: any) => {
     dirtyEditFieldsRef.current.add(fieldId);
@@ -749,6 +748,8 @@ export const WaliDashboard: React.FC = () => {
                 <img
                   src={logoSrc}
                   alt="Logo"
+                  decoding="async"
+                  fetchPriority="high"
                   className="w-full h-full object-contain"
                   onError={() => setLogoError(true)}
                 />
@@ -938,29 +939,33 @@ export const WaliDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* SECTION 1: EMPTY STATE IF 0 CHILDREN */}
+        {/* SECTION 1: SKELETON OR EMPTY STATE IF 0 CHILDREN */}
         {myStudents.length === 0 ? (
-          <div className="bg-white rounded-3xl p-8 sm:p-12 text-center space-y-5 border border-slate-200/80 shadow-2xs">
-            <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto border border-emerald-200 shadow-inner">
-              <GraduationCap className="w-8 h-8 text-emerald-700" />
+          isInitialLoading || isUserDataLoading ? (
+            <WaliDashboardSkeleton />
+          ) : (
+            <div className="bg-white rounded-3xl p-8 sm:p-12 text-center space-y-5 border border-slate-200/80 shadow-2xs">
+              <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-800 flex items-center justify-center mx-auto border border-emerald-200 shadow-inner">
+                <GraduationCap className="w-8 h-8 text-emerald-700" />
+              </div>
+              <div className="max-w-md mx-auto space-y-2">
+                <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
+                  Ahlan wa Sahlan, {currentUser?.name || 'Wali Siswa'}!
+                </h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Belum ada santri atau calon siswa yang terdaftar di akun Anda. Silakan klik tombol di bawah untuk mendaftarkan putra/putri Anda ke unit {units.length > 0 ? units.map((u) => u.shortName).join(', ') : 'pendidikan Yayasan Ar-Risalah Aceh'}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRegisterWizardOpen(true)}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold shadow-md shadow-emerald-800/20 active:scale-95 transition-all cursor-pointer"
+              >
+                <Plus className="w-4.5 h-4.5" />
+                <span>Daftarkan Ananda Sekarang</span>
+              </button>
             </div>
-            <div className="max-w-md mx-auto space-y-2">
-              <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
-                Ahlan wa Sahlan, {currentUser?.name || 'Wali Siswa'}!
-              </h3>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Belum ada santri atau calon siswa yang terdaftar di akun Anda. Silakan klik tombol di bawah untuk mendaftarkan putra/putri Anda ke unit {units.length > 0 ? units.map((u) => u.shortName).join(', ') : 'pendidikan Yayasan Ar-Risalah Aceh'}.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setRegisterWizardOpen(true)}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold shadow-md shadow-emerald-800/20 active:scale-95 transition-all cursor-pointer"
-            >
-              <Plus className="w-4.5 h-4.5" />
-              <span>Daftarkan Ananda Sekarang</span>
-            </button>
-          </div>
+          )
         ) : (
           /* SECTION 2: GRID KARTU ANAK ("SATU KARTU PER ANAK") */
           <div className="space-y-4">
@@ -1028,7 +1033,7 @@ export const WaliDashboard: React.FC = () => {
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 to-emerald-800 text-white flex items-center justify-center font-extrabold text-lg overflow-hidden border border-emerald-300 shadow-2xs shrink-0">
                             {childPhoto ? (
-                              <img src={childPhoto} alt={childDisplayName} className="w-full h-full object-cover" />
+                              <img src={childPhoto} alt={childDisplayName} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                             ) : (
                               <span>{initial}</span>
                             )}
@@ -1888,6 +1893,7 @@ export const WaliDashboard: React.FC = () => {
                             <img
                               src={printQrDataUrl}
                               alt="QR Verifikasi Kartu"
+                              decoding="async"
                               className="w-16 h-16 object-contain border border-emerald-200 rounded-md p-0.5 bg-white"
                             />
                           ) : (
@@ -2308,6 +2314,8 @@ export const WaliDashboard: React.FC = () => {
                                 <img
                                   src={rec.proofUrl}
                                   alt={`Bukti #${idx + 1}`}
+                                  loading="lazy"
+                                  decoding="async"
                                   className="w-full h-full object-cover"
                                 />
                               )}
@@ -2557,6 +2565,7 @@ export const WaliDashboard: React.FC = () => {
                         <img
                           src={proofFileData}
                           alt="Pratinjau Struk"
+                          decoding="async"
                           className="w-10 h-10 rounded-lg object-cover border border-emerald-300 shrink-0"
                         />
                       )}
@@ -2858,6 +2867,7 @@ export const WaliDashboard: React.FC = () => {
               <img
                 src={previewDocUrl}
                 alt="Pratinjau Dokumen"
+                decoding="async"
                 className="max-h-[60vh] mx-auto rounded-2xl shadow-sm border border-slate-200 object-contain"
               />
             )}

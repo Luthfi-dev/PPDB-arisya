@@ -869,8 +869,8 @@ var INITIAL_LANDING_CONFIG = [
     },
     helpTitle: "Perlu Bantuan / Kendala Pendaftaran?",
     helpSubtitle: "Tim panitia PPDB Yayasan Ar-Risalah Aceh siap membantu Anda setiap Senin - Sabtu pukul 08:00 - 16:00 WIB.",
-    logoUrl: "/uploads/1794360625078_my_new_logo.png",
-    faviconUrl: "/favicon.ico",
+    logoUrl: "/uploads/logo.png",
+    faviconUrl: "/uploads/favicon.ico",
     metaTitle: "PPDB Ar-Risalah Aceh | Penerimaan Peserta Didik Baru 2026/2027",
     metaDescription: "Sistem Penerimaan Peserta Didik Baru (PPDB) Yayasan Ar-Risalah Aceh untuk jenjang TKIT, SDIT, SMPIT, dan SMAIT Tahun Ajaran 2026/2027. Pendaftaran Online Resmi.",
     metaKeywords: "PPDB, Ar-Risalah, Aceh, Bireuen, Sekolah Islam Terpadu, TKIT, SDIT, SMPIT, SMAIT, Tahfidz Al-Quran, Boarding School",
@@ -6608,6 +6608,28 @@ var SERVER_MODULE_DIR = path2.dirname(fileURLToPath2(import.meta.url));
 var PROJECT_ROOT2 = fs2.existsSync(path2.join(SERVER_MODULE_DIR, "package.json")) ? SERVER_MODULE_DIR : process.cwd();
 dotenv2.config({ path: path2.resolve(PROJECT_ROOT2, ".env") });
 dotenv2.config();
+var ENV_PLACEHOLDER_APP_URL = "https://ppdb.sekolahanda.sch.id";
+function getConfiguredAppUrl(req) {
+  const rawEnv = String(process.env.APP_URL || "").trim().replace(/\/+$/, "");
+  if (rawEnv) {
+    try {
+      const parsed = new URL(rawEnv);
+      if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.origin.toLowerCase() !== ENV_PLACEHOLDER_APP_URL) {
+        return rawEnv;
+      }
+    } catch {
+    }
+  }
+  if (req) {
+    const fwdProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+    const proto = fwdProto === "https" || req.secure ? "https" : req.protocol || "http";
+    const host = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim() || String(req.get("host") || "").trim();
+    if (host) {
+      return `${proto}://${host}`.replace(/\/+$/, "");
+    }
+  }
+  return "https://ppdb.arrisalahaceh.or.id";
+}
 var ALL_VALID_PERMISSIONS = new Set(
   MODULE_ACTIONS.flatMap((m) => [m.module, ...m.actions.map((a) => `${m.module}:${a.key}`)])
 );
@@ -6767,6 +6789,277 @@ async function sendMailWithActiveSmtp(params) {
     }
   }
   return { sent: false, error: lastError || "Gagal mengirim email melalui seluruh akun SMTP." };
+}
+function maskEmailAddress(email) {
+  const clean = String(email || "").trim();
+  const [localPart, domain] = clean.split("@");
+  if (!localPart) return "***";
+  const maskedLocal = localPart.length <= 2 ? `${localPart[0] || "*"}*` : `${localPart.slice(0, 2)}***`;
+  return domain ? `${maskedLocal}@${domain}` : maskedLocal;
+}
+function sanitizeEmailSubjectText(val) {
+  return String(val ?? "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+function resolveGuardianEmailForStudent(student, allUsers, unitSchema) {
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  const isCleanEmail = (v) => typeof v === "string" && emailRegex.test(v.trim()) && !v.includes("\r") && !v.includes("\n");
+  const parentUser = allUsers.find((u) => {
+    if (student?.parentUserId && u.id === student.parentUserId) return true;
+    if (student && Array.isArray(u.childrenIds) && u.childrenIds.includes(student.id)) return true;
+    if (student && u.studentId && u.studentId === student.id) return true;
+    if (student && u.studentRegistrationNumber && u.studentRegistrationNumber === student.registrationNumber) {
+      return true;
+    }
+    return false;
+  });
+  if (parentUser) {
+    const cleanEmail = isCleanEmail(parentUser.email) ? parentUser.email.trim() : "";
+    const parentName = parentUser.name || student?.parentName || "Bapak/Ibu Wali Murid";
+    if (!cleanEmail) {
+      return {
+        email: "",
+        parentName,
+        emailVerified: false,
+        reason: "Email wali murid tidak ditemukan atau formatnya tidak valid."
+      };
+    }
+    if (parentUser.emailVerified !== true) {
+      return {
+        email: cleanEmail,
+        parentName,
+        emailVerified: false,
+        reason: "Email wali murid belum diverifikasi."
+      };
+    }
+    return {
+      email: cleanEmail,
+      parentName,
+      emailVerified: true
+    };
+  }
+  const answers = student?.dynamicAnswers;
+  let candidateEmail = "";
+  if (answers && typeof answers === "object") {
+    const sections = Array.isArray(unitSchema?.sections) ? unitSchema.sections : [];
+    outer: for (const sec of sections) {
+      for (const f of sec?.fields || []) {
+        const label = String(f?.label || "").toLowerCase();
+        if (f?.type === "email" || label.includes("email")) {
+          const val = answers[f.id];
+          if (isCleanEmail(val)) {
+            candidateEmail = val.trim();
+            break outer;
+          }
+        }
+      }
+    }
+    if (!candidateEmail) {
+      for (const [k, val] of Object.entries(answers)) {
+        if (/email/i.test(k) && isCleanEmail(val)) {
+          candidateEmail = val.trim();
+          break;
+        }
+      }
+    }
+  }
+  if (candidateEmail) {
+    const matchedUser = allUsers.find(
+      (u) => typeof u?.email === "string" && u.email.trim().toLowerCase() === candidateEmail.toLowerCase()
+    );
+    if (matchedUser && matchedUser.emailVerified === true) {
+      return {
+        email: candidateEmail,
+        parentName: matchedUser.name || student?.parentName || "Bapak/Ibu Wali Murid",
+        emailVerified: true
+      };
+    }
+    return {
+      email: candidateEmail,
+      parentName: matchedUser?.name || student?.parentName || "Bapak/Ibu Wali Murid",
+      emailVerified: false,
+      reason: "Email wali murid belum diverifikasi."
+    };
+  }
+  return {
+    email: "",
+    parentName: student?.parentName || "Bapak/Ibu Wali Murid",
+    emailVerified: false,
+    reason: "Email wali murid tidak ditemukan pada akun pendaftar terkait."
+  };
+}
+async function sendPaymentRejectionEmailToWali(rejectedPayments, req) {
+  try {
+    if (!Array.isArray(rejectedPayments) || rejectedPayments.length === 0) {
+      return { sent: false, error: "Tidak ada data bukti pembayaran yang ditolak." };
+    }
+    const primaryPay = rejectedPayments[0];
+    const allStudents = db.getStudents();
+    const student = (primaryPay.registrationId ? db.getStudentById(primaryPay.registrationId) : void 0) || allStudents.find(
+      (s) => primaryPay.registrationId && s.id === primaryPay.registrationId || primaryPay.registrationNumber && s.registrationNumber === primaryPay.registrationNumber
+    );
+    const allSchemas = db.getFormSchemas();
+    const unitId = student?.unit || primaryPay.unit || "";
+    const unitSchema = allSchemas.find((fs3) => fs3.unitId === unitId);
+    const {
+      email: recipientEmail,
+      parentName,
+      emailVerified,
+      reason: emailResolveReason
+    } = resolveGuardianEmailForStudent(student, db.getUsers(), unitSchema);
+    if (!recipientEmail) {
+      return {
+        sent: false,
+        error: emailResolveReason || "Email wali murid tidak ditemukan pada akun pendaftar terkait."
+      };
+    }
+    if (emailVerified !== true) {
+      const recipientMasked2 = maskEmailAddress(recipientEmail);
+      console.log(
+        `[Mail Payment Reject] Pengiriman email ke ${recipientMasked2} dilewati karena email wali belum diverifikasi.`
+      );
+      return {
+        sent: false,
+        recipientMasked: recipientMasked2,
+        error: "Email wali murid belum diverifikasi, sehingga notifikasi email tidak dikirim."
+      };
+    }
+    const landingConfig = db.getLandingConfig();
+    const appNameFromDb = landingConfig?.appName || "PPDB Yayasan Pendidikan Islam Ar-Risalah Aceh";
+    const activeYearLabel = getActiveAcademicYearLabel(db.getAcademicYears());
+    const unitObj = db.getUnits().find((u) => u.id === unitId);
+    const unitDisplayName = unitObj?.name || unitId || "Unit Pendidikan";
+    const unitContacts = db.getUnitContacts();
+    const unitContact = unitContacts.find((c) => c.unitId === unitId) || unitContacts.find((c) => c.unitId === "MASTER");
+    const contactPhone = unitContact?.whatsapp || unitContact?.phone || landingConfig?.contact?.whatsapp || landingConfig?.contact?.phone || "-";
+    const contactEmail = unitContact?.email || landingConfig?.contact?.email || "info@arrisalahaceh.or.id";
+    const contactAddress = unitContact?.address || landingConfig?.contact?.address || "Jl. BTN Kupula Indah, Geulanggang Gampong, Kab. Bireuen, Aceh";
+    const studentName = (student ? resolveStudentNameFromSchema(student, unitSchema) : "") || primaryPay.studentName || "Calon Peserta Didik";
+    const regNumber = student?.registrationNumber || primaryPay.registrationNumber || "-";
+    const billTypeLabel = primaryPay.type === "Daftar Ulang" ? "Biaya Daftar Ulang" : "Biaya Formulir Pendaftaran";
+    const rejectionReason = primaryPay.verificationNotes || "Bukti transfer belum valid, buram, atau nominal belum sesuai ketentuan.";
+    const totalRejectedAmount = rejectedPayments.reduce(
+      (sum, item) => sum + (Number(item?.amount) || 0),
+      0
+    );
+    const portalUrl = getConfiguredAppUrl(req);
+    const proofRowsHtml = rejectedPayments.map((item, idx) => {
+      const nominalFormatted = `Rp ${(Number(item?.amount) || 0).toLocaleString("id-ID")}`;
+      const paidAt = item?.paidAt ? `${item.paidAt} WIB` : "-";
+      const method = item?.method || "Transfer Bank";
+      return `
+          <tr style="border-bottom: 1px solid #fee2e2;">
+            <td style="padding: 8px 10px; color: #475569; font-size: 12.5px;">#${idx + 1} (${escapeHtml(method)})</td>
+            <td style="padding: 8px 10px; color: #334155; font-size: 12.5px;">${escapeHtml(paidAt)}</td>
+            <td style="padding: 8px 10px; font-weight: bold; color: #991b1b; text-align: right; font-size: 12.5px;">${escapeHtml(nominalFormatted)}</td>
+          </tr>
+        `;
+    }).join("");
+    const subject = sanitizeEmailSubjectText(
+      `[Perlu Perbaikan] Bukti Pembayaran ${billTypeLabel} Ditolak - ${studentName} (${regNumber})`
+    );
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; border: 1px solid #fecaca; border-radius: 16px; overflow: hidden; background: #ffffff;">
+        <div style="background-color: #991b1b; color: #ffffff; padding: 24px; text-align: center;">
+          <h2 style="margin: 0; font-size: 19px; letter-spacing: 0.4px; text-transform: uppercase;">${escapeHtml(appNameFromDb)}</h2>
+          <p style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.92;">Notifikasi Verifikasi Pembayaran PPDB ${escapeHtml(activeYearLabel)}</p>
+        </div>
+
+        <div style="padding: 26px 24px; color: #1e293b;">
+          <h3 style="color: #991b1b; margin-top: 0; font-size: 16px;">Assalamu'alaikum Warahmatullahi Wabarakatuh</h3>
+          <p style="font-size: 13.5px; line-height: 1.6; color: #334155;">
+            Yth. Bapak/Ibu <strong>${escapeHtml(parentName)}</strong>,<br/>
+            Terima kasih telah mengunggah bukti pembayaran untuk calon peserta didik atas nama <strong>${escapeHtml(studentName)}</strong>. Setelah dilakukan pemeriksaan mutasi dan validasi oleh tim Bendahara/Panitia PPDB, dengan berat hati kami informasikan bahwa bukti pembayaran tersebut <strong>BELUM DAPAT DISETUJUI (DITOLAK)</strong>.
+          </p>
+
+          <div style="background-color: #fef2f2; border: 1.5px solid #f87171; border-radius: 12px; padding: 16px; margin: 18px 0;">
+            <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: bold; color: #b91c1c; display: block; margin-bottom: 6px;">ALASAN PENOLAKAN / CATATAN VERIFIKATOR</span>
+            <p style="margin: 0; font-size: 14px; font-weight: bold; color: #7f1d1d; line-height: 1.5;">
+              "${escapeHtml(rejectionReason)}"
+            </p>
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px;">
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 8px 4px; font-weight: bold; color: #64748b; width: 175px;">Nama Calon Siswa</td>
+              <td style="padding: 8px 4px; font-weight: bold; color: #0f172a;">: ${escapeHtml(studentName)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 8px 4px; font-weight: bold; color: #64748b;">Nomor Pendaftaran</td>
+              <td style="padding: 8px 4px; font-weight: bold; font-family: monospace; color: #14532d;">: ${escapeHtml(regNumber)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 8px 4px; font-weight: bold; color: #64748b;">Unit Pendidikan</td>
+              <td style="padding: 8px 4px; font-weight: bold; color: #15803d;">: ${escapeHtml(unitDisplayName)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 8px 4px; font-weight: bold; color: #64748b;">Jenis Tagihan</td>
+              <td style="padding: 8px 4px; color: #334155; font-weight: bold;">: ${escapeHtml(billTypeLabel)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 8px 4px; font-weight: bold; color: #64748b;">Jumlah Bukti Ditolak</td>
+              <td style="padding: 8px 4px; color: #991b1b; font-weight: bold;">: ${rejectedPayments.length} bukti (Total Rp ${escapeHtml(totalRejectedAmount.toLocaleString("id-ID"))})</td>
+            </tr>
+          </table>
+
+          <div style="margin-top: 16px; border: 1px solid #fee2e2; border-radius: 10px; overflow: hidden;">
+            <div style="background-color: #fff5f5; padding: 8px 10px; font-size: 11.5px; font-weight: bold; color: #991b1b; border-bottom: 1px solid #fee2e2;">
+              Rincian Bukti Pembayaran yang Ditolak
+            </div>
+            <table style="width: 100%; border-collapse: collapse;">
+              ${proofRowsHtml}
+            </table>
+          </div>
+
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 15px; margin-top: 20px; font-size: 13px; color: #14532d; line-height: 1.6;">
+            <strong>Langkah Selanjutnya:</strong>
+            <ol style="margin: 6px 0 0 18px; padding: 0;">
+              <li>Pastikan nominal transfer, tanggal, dan rekening tujuan sudah sesuai dengan tagihan resmi PPDB.</li>
+              <li>Login ke <strong>Portal PPDB</strong> melalui tombol di bawah ini.</li>
+              <li>Buka menu <strong>Pembayaran / Upload Bukti Transfer</strong> pada data ananda, lalu unggah ulang foto/struk transfer yang jelas dan terbaca.</li>
+            </ol>
+          </div>
+
+          <div style="text-align: center; margin: 24px 0 10px 0;">
+            <a href="${escapeHtml(portalUrl)}" style="display: inline-block; background-color: #15803d; color: #ffffff; text-decoration: none; font-weight: bold; padding: 13px 26px; border-radius: 10px; font-size: 14px;">
+              Buka Portal PPDB &amp; Unggah Ulang Bukti
+            </a>
+          </div>
+          <p style="text-align: center; font-size: 11.5px; color: #64748b; margin-top: 8px; word-break: break-all;">
+            Tautan Portal: ${escapeHtml(portalUrl)}
+          </p>
+        </div>
+
+        <div style="background-color: #f8fafc; padding: 18px 24px; text-align: center; font-size: 11.5px; color: #64748b; border-top: 1px solid #e2e8f0; line-height: 1.6;">
+          <strong style="color: #1e293b; font-size: 12px;">Panitia PPDB ${escapeHtml(appNameFromDb)}</strong><br/>
+          ${escapeHtml(contactAddress)}<br/>
+          Telp/WA: ${escapeHtml(contactPhone)} &nbsp;|&nbsp; Email: ${escapeHtml(contactEmail)}
+        </div>
+      </div>
+    `;
+    const mailOutcome = await sendMailWithActiveSmtp({
+      to: recipientEmail,
+      subject,
+      html
+    });
+    const recipientMasked = maskEmailAddress(recipientEmail);
+    if (mailOutcome.sent) {
+      console.log(
+        `[Mail Payment Reject] Notifikasi penolakan terkirim ke ${recipientMasked} (${regNumber}) via ${mailOutcome.usedAccount}`
+      );
+      return { sent: true, recipientMasked };
+    }
+    return {
+      sent: false,
+      recipientMasked,
+      error: mailOutcome.error || "Gagal mengirim email notifikasi penolakan."
+    };
+  } catch (err) {
+    console.error("[Mail Payment Reject Error]:", err);
+    return {
+      sent: false,
+      error: err?.message || "Terjadi kesalahan saat memproses notifikasi email penolakan."
+    };
+  }
 }
 async function generateStudentCardPdfBuffer(student, schedule, landingConfig, letterConfigs, formSchemas) {
   const doc = new jsPDF({
@@ -6944,7 +7237,7 @@ async function generateStudentCardPdfBuffer(student, schedule, landingConfig, le
   doc.text("Orang Tua / Wali Siswa,", 30, sigY + 4.5, { align: "center" });
   doc.text(`${locationText}, ${issueDateText}`, pageWidth - 40, sigY, { align: "center" });
   doc.text(`${chairTitleText},`, pageWidth - 40, sigY + 4.5, { align: "center" });
-  const baseUrl = process.env.APP_URL || "https://ppdb.arrisalahaceh.or.id";
+  const baseUrl = getConfiguredAppUrl();
   const verifyUrl = `${baseUrl}/#verify-ttd?reg=${encodeURIComponent(student.registrationNumber || "")}`;
   let qrDataUrl = "";
   try {
@@ -7304,11 +7597,77 @@ function seedDefaultUploadAssets() {
 }
 syncUploadsDirectory();
 seedDefaultUploadAssets();
+function syncActiveLogoToDefaultFile() {
+  try {
+    const landing = db.getLandingConfig();
+    if (!landing) return;
+    const logoDefaultPub = path2.join(uploadsDir, "logo.png");
+    const logoDefaultData = path2.join(dataUploadsDir, "logo.png");
+    const currentLogoFile = landing.logoUrl ? path2.basename(landing.logoUrl.split("?")[0]) : "";
+    if (currentLogoFile && currentLogoFile !== "logo.png") {
+      const pubSrc = path2.join(uploadsDir, currentLogoFile);
+      const dataSrc = path2.join(dataUploadsDir, currentLogoFile);
+      const existingSrc = fs2.existsSync(pubSrc) ? pubSrc : fs2.existsSync(dataSrc) ? dataSrc : "";
+      if (existingSrc) {
+        try {
+          fs2.copyFileSync(existingSrc, logoDefaultPub);
+        } catch (e) {
+        }
+        try {
+          fs2.copyFileSync(existingSrc, logoDefaultData);
+        } catch (e) {
+        }
+      } else if (landing.customLogoBase64 && landing.customLogoBase64.startsWith("data:image/")) {
+        const buf = Buffer.from(
+          landing.customLogoBase64.replace(/^data:([A-Za-z-+\/]+);base64,/, ""),
+          "base64"
+        );
+        try {
+          fs2.writeFileSync(logoDefaultPub, buf);
+        } catch (e) {
+        }
+        try {
+          fs2.writeFileSync(logoDefaultData, buf);
+        } catch (e) {
+        }
+      }
+    } else if (landing.customLogoBase64 && landing.customLogoBase64.startsWith("data:image/")) {
+      const buf = Buffer.from(
+        landing.customLogoBase64.replace(/^data:([A-Za-z-+\/]+);base64,/, ""),
+        "base64"
+      );
+      try {
+        fs2.writeFileSync(logoDefaultPub, buf);
+      } catch (e) {
+      }
+      try {
+        fs2.writeFileSync(logoDefaultData, buf);
+      } catch (e) {
+      }
+    }
+  } catch (e) {
+    console.error("[SyncActiveLogo Error]:", e);
+  }
+}
+app.use(
+  "/src/assets/images",
+  express.static(path2.resolve(PROJECT_ROOT2, "src", "assets", "images"), {
+    maxAge: "7d"
+  })
+);
+function setUploadCacheHeader(res, filename) {
+  if (filename === "logo.png" || filename === "logo.jpg" || filename === "favicon.ico") {
+    res.setHeader("Cache-Control", "no-cache, must-revalidate");
+  } else {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+  }
+}
 app.get("/uploads/:filename", (req, res, next) => {
   const safeFilename = path2.basename(req.params.filename);
   const publicFile = path2.join(uploadsDir, safeFilename);
   const dataFile = path2.join(dataUploadsDir, safeFilename);
   if (fs2.existsSync(publicFile)) {
+    setUploadCacheHeader(res, safeFilename);
     return res.sendFile(publicFile);
   }
   if (fs2.existsSync(dataFile)) {
@@ -7316,6 +7675,7 @@ app.get("/uploads/:filename", (req, res, next) => {
       fs2.copyFileSync(dataFile, publicFile);
     } catch (e) {
     }
+    setUploadCacheHeader(res, safeFilename);
     return res.sendFile(dataFile);
   }
   try {
@@ -7332,6 +7692,7 @@ app.get("/uploads/:filename", (req, res, next) => {
         fs2.writeFileSync(dataFile, logoBuf);
       } catch (e) {
       }
+      setUploadCacheHeader(res, safeFilename);
       return res.sendFile(publicFile);
     }
     const currentFaviconFile = landing?.faviconUrl ? path2.basename(landing.faviconUrl) : "";
@@ -7346,19 +7707,21 @@ app.get("/uploads/:filename", (req, res, next) => {
         fs2.writeFileSync(dataFile, favBuf);
       } catch (e) {
       }
+      setUploadCacheHeader(res, safeFilename);
       return res.sendFile(publicFile);
     }
   } catch (e) {
   }
   if (safeFilename.includes("logo") || safeFilename.includes("1000828600")) {
-    const defaultLogo = path2.resolve(process.cwd(), "src", "assets", "images", "logo_arrisalah_crest_1792900905994.jpg");
+    const defaultLogo = path2.resolve(PROJECT_ROOT2, "src", "assets", "images", "logo_arrisalah_crest_1792900905994.jpg");
     if (fs2.existsSync(defaultLogo)) {
+      setUploadCacheHeader(res, safeFilename);
       return res.sendFile(defaultLogo);
     }
   }
   next();
 });
-app.use("/uploads", express.static(uploadsDir));
+app.use("/uploads", express.static(uploadsDir, { maxAge: "1d" }));
 var requestCounts = /* @__PURE__ */ new Map();
 var authAttemptMap = /* @__PURE__ */ new Map();
 var realDbPinRateLimitMap = /* @__PURE__ */ new Map();
@@ -7621,7 +7984,7 @@ app.post("/api/auth/forgot-password", authRateLimiter, async (req, res) => {
       }
       return res.json(genericSuccessResponse);
     }
-    const appBaseUrl = process.env.APP_URL && process.env.APP_URL.trim().replace(/\/+$/, "") || `${req.protocol}://${req.get("host")}`;
+    const appBaseUrl = getConfiguredAppUrl(req);
     const resetLink = `${appBaseUrl}/?resetToken=${encodeURIComponent(tokenResult.rawToken)}`;
     const mailOutcome = await sendMailWithActiveSmtp({
       to: tokenResult.user.email,
@@ -8422,8 +8785,33 @@ app.post("/api/payments/verify-group", requireAuth, requirePermission("Pembayara
     }
     const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 1e3) : void 0;
     const verifiedBy = req.user?.email || "bendahara@arrisalahaceh.or.id";
-    const updatedList = await db.verifyPaymentGroup(cleanIds, Boolean(approved), cleanNotes, verifiedBy);
-    res.json({ payments: updatedList.map(attachReceiptSig) });
+    const isApproved = Boolean(approved);
+    const updatedList = await db.verifyPaymentGroup(cleanIds, isApproved, cleanNotes, verifiedBy);
+    let emailNotification;
+    if (!isApproved && updatedList.length > 0) {
+      const groupedByStudent = /* @__PURE__ */ new Map();
+      for (const item of updatedList) {
+        const key = item.registrationId || item.registrationNumber || item.id;
+        const arr = groupedByStudent.get(key) || [];
+        arr.push(item);
+        groupedByStudent.set(key, arr);
+      }
+      const mailResults = [];
+      for (const groupItems of groupedByStudent.values()) {
+        mailResults.push(await sendPaymentRejectionEmailToWali(groupItems, req));
+      }
+      const firstSuccess = mailResults.find((r) => r.sent);
+      const firstWithMask = mailResults.find((r) => r.recipientMasked);
+      emailNotification = {
+        sent: mailResults.some((r) => r.sent),
+        recipientMasked: firstSuccess?.recipientMasked || firstWithMask?.recipientMasked,
+        error: mailResults.every((r) => r.sent) ? void 0 : mailResults.find((r) => !r.sent && r.error)?.error
+      };
+    }
+    res.json({
+      payments: updatedList.map(attachReceiptSig),
+      ...emailNotification ? { emailNotification } : {}
+    });
   } catch (err) {
     console.error("[API Verify Payment Group Error]:", err);
     res.status(500).json({ error: "Gagal memperbarui status verifikasi pembayaran di database." });
@@ -8453,11 +8841,16 @@ app.post("/api/payments/:id/verify", requireAuth, requirePermission("Pembayaran"
     }
     const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 1e3) : void 0;
     const verifiedBy = req.user?.email || "bendahara@arrisalahaceh.or.id";
-    const updated = await db.verifyPayment(req.params.id, Boolean(approved), cleanNotes, verifiedBy, adjustedAmount);
+    const isApproved = Boolean(approved);
+    const updated = await db.verifyPayment(req.params.id, isApproved, cleanNotes, verifiedBy, adjustedAmount);
     if (!updated) {
       return res.status(404).json({ error: "Catatan pembayaran tidak ditemukan." });
     }
-    res.json(attachReceiptSig(updated));
+    const emailNotification = !isApproved ? await sendPaymentRejectionEmailToWali([updated], req) : void 0;
+    res.json({
+      ...attachReceiptSig(updated),
+      ...emailNotification ? { emailNotification } : {}
+    });
   } catch (err) {
     console.error("[API Verify Payment Error]:", err);
     res.status(500).json({ error: "Gagal memperbarui status verifikasi pembayaran di database." });
@@ -8819,23 +9212,23 @@ app.post("/api/upload-asset", requireAuth, requireMaster, uploadRateLimiter, asy
     const baseClean = path2.basename(String(filename), rawExt).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
     const timestamp = Date.now();
     const safeName = `${timestamp}_${baseClean}${ext}`;
-    const targetPath = path2.resolve(process.cwd(), "public", "uploads", safeName);
+    const targetPath = path2.join(uploadsDir, safeName);
     fs2.writeFileSync(targetPath, buffer);
-    const dataTargetPath = path2.resolve(process.cwd(), "data", "uploads", safeName);
+    const dataTargetPath = path2.join(dataUploadsDir, safeName);
     try {
       fs2.writeFileSync(dataTargetPath, buffer);
     } catch (e) {
     }
     if (assetType === "logo") {
       try {
-        fs2.copyFileSync(targetPath, path2.resolve(process.cwd(), "public", "uploads", "logo.png"));
-        fs2.copyFileSync(targetPath, path2.resolve(process.cwd(), "data", "uploads", "logo.png"));
+        fs2.copyFileSync(targetPath, path2.join(uploadsDir, "logo.png"));
+        fs2.copyFileSync(targetPath, path2.join(dataUploadsDir, "logo.png"));
       } catch (e) {
       }
     } else if (assetType === "favicon") {
       try {
-        fs2.copyFileSync(targetPath, path2.resolve(process.cwd(), "public", "uploads", "favicon.ico"));
-        fs2.copyFileSync(targetPath, path2.resolve(process.cwd(), "data", "uploads", "favicon.ico"));
+        fs2.copyFileSync(targetPath, path2.join(uploadsDir, "favicon.ico"));
+        fs2.copyFileSync(targetPath, path2.join(dataUploadsDir, "favicon.ico"));
       } catch (e) {
       }
     }
@@ -9308,7 +9701,7 @@ app.post("/api/users/:id/reset-password", requireAuth, async (req, res) => {
       const status = tokenResult.cooldownSeconds ? 429 : 400;
       return res.status(status).json({ error: tokenResult.error });
     }
-    const appBaseUrl = process.env.APP_URL && process.env.APP_URL.trim().replace(/\/+$/, "") || `${req.protocol}://${req.get("host")}`;
+    const appBaseUrl = getConfiguredAppUrl(req);
     const resetLink = `${appBaseUrl}/?resetToken=${encodeURIComponent(tokenResult.rawToken)}`;
     const mailOutcome = await sendMailWithActiveSmtp({
       to: target.email,
@@ -9435,7 +9828,12 @@ app.post("/api/academic-years/:id/activate", requireAuth, requireMaster, async (
   }
 });
 app.get("/api/landing-config", (req, res) => {
-  res.json(db.getLandingConfig());
+  const cfg = db.getLandingConfig();
+  const { customLogoBase64, customFaviconBase64, ...rest } = cfg || {};
+  res.json({
+    ...rest,
+    appUrl: getConfiguredAppUrl(req)
+  });
 });
 app.put("/api/landing-config", requireAuth, requireMaster, async (req, res) => {
   try {
@@ -9475,7 +9873,12 @@ app.put("/api/landing-config", requireAuth, requireMaster, async (req, res) => {
     const actor = req.user?.email || req.user?.name || "Master Admin";
     const actorRole = req.user?.role || "Super Admin Yayasan";
     const updated = await db.updateLandingConfig(body, actor, actorRole);
-    res.json(updated);
+    syncActiveLogoToDefaultFile();
+    const { customLogoBase64, customFaviconBase64, ...cleanUpdated } = updated || {};
+    res.json({
+      ...cleanUpdated,
+      appUrl: getConfiguredAppUrl(req)
+    });
   } catch (err) {
     console.error("[API Update Landing Config Error]:", err);
     res.status(500).json({ error: "Gagal menyimpan konfigurasi landing page ke database." });
@@ -10853,6 +11256,7 @@ app.use((err, req, res, next) => {
 });
 async function startServer() {
   await initDatabase();
+  syncActiveLogoToDefaultFile();
   const distPath = fs2.existsSync(path2.resolve(PROJECT_ROOT2, "dist", "index.html")) ? path2.resolve(PROJECT_ROOT2, "dist") : path2.resolve(process.cwd(), "dist");
   const serveBuiltFrontend = () => {
     const indexHtmlPath = path2.join(distPath, "index.html");

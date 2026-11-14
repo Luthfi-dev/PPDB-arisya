@@ -30,6 +30,7 @@ import { UnitBadge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { getActiveAcademicYearLabel } from '../../utils/studentFieldResolver';
 import { DeveloperFooter } from '../common/DeveloperFooter';
+import { SkeletonBlock } from '../common/Skeleton';
 
 export const LandingPage: React.FC = () => {
   const {
@@ -44,6 +45,7 @@ export const LandingPage: React.FC = () => {
     setRegisterWizardOpen,
     setPendingRegisterUnit,
     unitContacts,
+    isInitialLoading,
     showToast,
   } = usePPDB();
 
@@ -87,6 +89,11 @@ export const LandingPage: React.FC = () => {
   }, [heroSlides.length, currentSlide]);
 
   const activeSlide = heroSlides[currentSlide] || heroSlides[0];
+  const [heroImgLoaded, setHeroImgLoaded] = useState(false);
+
+  useEffect(() => {
+    setHeroImgLoaded(false);
+  }, [activeSlide?.imageUrl]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -179,7 +186,7 @@ export const LandingPage: React.FC = () => {
     setLogoError(false);
   }, [landingConfig?.logoUrl]);
 
-  const logoSrc = landingConfig?.logoUrl || '/uploads/1794360625078_my_new_logo.png';
+  const logoSrc = landingConfig?.logoUrl || '/uploads/logo.png';
   const fallbackInitial = landingConfig?.appName ? landingConfig.appName.charAt(0).toUpperCase() : 'P';
 
   return (
@@ -193,6 +200,8 @@ export const LandingPage: React.FC = () => {
               <img
                 src={logoSrc}
                 alt={landingConfig.appName || 'Logo PPDB'}
+                decoding="async"
+                fetchPriority="high"
                 className="w-full h-full object-contain"
                 onError={() => setLogoError(true)}
               />
@@ -363,12 +372,21 @@ export const LandingPage: React.FC = () => {
             )}
 
             {/* Main Slideshow Image Box */}
-            <div className="relative rounded-3xl overflow-hidden shadow-2xl border-4 border-white bg-slate-900 group">
+            <div className="relative rounded-3xl overflow-hidden shadow-2xl border-4 border-white bg-emerald-950/90 group">
+              {!heroImgLoaded && (
+                <div className="absolute inset-0 bg-emerald-900/60 animate-pulse z-0" aria-hidden="true" />
+              )}
               <img
                 src={activeSlide.imageUrl}
                 alt={activeSlide.title}
-                className="w-full h-80 lg:h-96 object-cover transition-all duration-700 group-hover:scale-105"
+                decoding="async"
+                fetchPriority="high"
+                onLoad={() => setHeroImgLoaded(true)}
+                className={`relative z-[1] w-full h-80 lg:h-96 object-cover transition-all duration-700 group-hover:scale-105 ${
+                  heroImgLoaded ? 'opacity-100' : 'opacity-0'
+                }`}
                 onError={(e) => {
+                  setHeroImgLoaded(true);
                   e.currentTarget.src = '/src/assets/images/campus_arrisalah_aceh_1792900903501.jpg';
                 }}
               />
@@ -451,7 +469,20 @@ export const LandingPage: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {units.map((unit) => {
+          {isInitialLoading && units.length === 0 ? (
+            [0, 1, 2, 3].map((idx) => (
+              <div key={idx} className="p-6 rounded-2xl border border-emerald-100 bg-white shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <SkeletonBlock className="h-5 w-16 rounded-full" />
+                  <SkeletonBlock className="h-5 w-20 rounded-full" />
+                </div>
+                <SkeletonBlock className="h-5 w-3/4" />
+                <SkeletonBlock className="h-16 w-full rounded-xl" />
+                <SkeletonBlock className="h-10 w-full rounded-xl" />
+              </div>
+            ))
+          ) : (
+            units.map((unit) => {
             const remaining = Math.max(0, unit.totalQuota - unit.filledQuota);
             const isOpen = unit.isOpen !== false;
             const isFull = remaining <= 0;
@@ -546,7 +577,8 @@ export const LandingPage: React.FC = () => {
                 )}
               </div>
             );
-          })}
+          })
+          )}
         </div>
       </section>
 

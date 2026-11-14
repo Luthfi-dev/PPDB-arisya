@@ -23,6 +23,7 @@ import { Pagination } from '../../common/Pagination';
 import { StudentRegistration, UnitFormSchema, FormField } from '../../../types/ppdb';
 import { hasActionPermission } from '../../../utils/rbac';
 import { ExportDropdown } from '../../common/ExportDropdown';
+import { TableRowsSkeleton } from '../../common/Skeleton';
 import {
   ensureCoreNameFieldInSections,
   formatCardFieldDisplayValue,
@@ -49,6 +50,7 @@ export const PendaftarView: React.FC<{ searchQuery?: string }> = ({
     updateStudent,
     verifyStudentDocument,
     currentUser,
+    isUserDataLoading,
   } = usePPDB();
 
   const canEdit = hasActionPermission(currentUser, 'Pendaftar', 'edit');
@@ -363,7 +365,12 @@ export const PendaftarView: React.FC<{ searchQuery?: string }> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {paginatedStudents.length === 0 ? (
+              {isUserDataLoading && students.length === 0 ? (
+                <TableRowsSkeleton
+                  rows={6}
+                  cols={activeUnitSchema ? 6 + activeExtraListFields.length : 7}
+                />
+              ) : paginatedStudents.length === 0 ? (
                 <tr>
                   <td
                     colSpan={activeUnitSchema ? 6 + activeExtraListFields.length : 7}
@@ -658,6 +665,8 @@ export const PendaftarView: React.FC<{ searchQuery?: string }> = ({
                             <img
                               src={doc.url}
                               alt={doc.label}
+                              loading="lazy"
+                              decoding="async"
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                             />
                           )}
@@ -750,6 +759,7 @@ export const PendaftarView: React.FC<{ searchQuery?: string }> = ({
               <img
                 src={previewImage}
                 alt="Dokumen Zoom"
+                decoding="async"
                 className="w-full h-auto max-h-[80vh] object-contain rounded-xl"
               />
             )}

@@ -16,6 +16,7 @@ import { Pagination } from '../../common/Pagination';
 import { StudentRegistration, UnitFormSchema } from '../../../types/ppdb';
 import { hasActionPermission } from '../../../utils/rbac';
 import { ExportDropdown } from '../../common/ExportDropdown';
+import { TableRowsSkeleton } from '../../common/Skeleton';
 import {
   ensureCoreNameFieldInSections,
   formatCardFieldDisplayValue,
@@ -30,7 +31,7 @@ import {
 } from '../../../utils/studentFieldResolver';
 
 export const VerifikasiView: React.FC = () => {
-  const { students, units, formSchemas, activeSchoolId, verifyStudentDocument, currentUser } = usePPDB();
+  const { students, units, formSchemas, activeSchoolId, verifyStudentDocument, currentUser, isUserDataLoading } = usePPDB();
 
   const canVerify = hasActionPermission(currentUser, 'Verifikasi', 'verify');
 
@@ -312,7 +313,15 @@ export const VerifikasiView: React.FC = () => {
 
       {/* Main List */}
       <div className="bg-white rounded-2xl shadow-sm border border-emerald-100 overflow-hidden">
-        {verificationList.length === 0 ? (
+        {isUserDataLoading && students.length === 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <tbody className="divide-y divide-slate-100 text-xs">
+                <TableRowsSkeleton rows={5} cols={6} />
+              </tbody>
+            </table>
+          </div>
+        ) : verificationList.length === 0 ? (
           <div className="py-16 text-center">
             <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
             <h4 className="text-sm font-bold text-slate-800">
@@ -444,6 +453,8 @@ export const VerifikasiView: React.FC = () => {
                                       <img
                                         src={docSlot.url}
                                         alt={docSlot.label}
+                                        loading="lazy"
+                                        decoding="async"
                                         className="w-full h-full object-cover group-hover:scale-110 transition-transform"
                                       />
                                     )}
@@ -694,6 +705,8 @@ export const VerifikasiView: React.FC = () => {
                               <img
                                 src={doc.url}
                                 alt={doc.label}
+                                loading="lazy"
+                                decoding="async"
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                               />
                             )}
@@ -748,6 +761,7 @@ export const VerifikasiView: React.FC = () => {
               <img
                 src={zoomImage}
                 alt="Zoom Berkas"
+                decoding="async"
                 className="w-full max-h-[80vh] object-contain rounded-xl"
               />
             )}
